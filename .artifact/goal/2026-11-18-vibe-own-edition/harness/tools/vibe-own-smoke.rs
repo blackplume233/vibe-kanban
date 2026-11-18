@@ -1,18 +1,10 @@
-//! M1 探针。用锁定版本的 NSH Rust 根组件验证 Win32 渲染。
+//! M1 探针的 Win32 入口。
 
 #![windows_subsystem = "windows"]
 
-use nsh_core::prelude::*;
 use nsh_platform_windows::{AppOptions, AppSource, Appearance, Root, run_app};
 
-#[component]
-fn Smoke() -> impl IntoElement {
-    view()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .child(text("NSH 原生窗口已启动").text_size(px(28.0)))
-}
+include!("vibe-own-root.rs");
 
 fn main() -> std::process::ExitCode {
     run_app(

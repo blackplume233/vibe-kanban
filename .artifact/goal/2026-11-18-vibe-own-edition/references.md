@@ -29,6 +29,10 @@
 - `crates/remote` 是独立工作区。虽然 `vk-billing` 不在默认特性中，完整 `pnpm run check` 照样在解析 `billing` 时尝试访问私有 Git 依赖。此次日志明确报 SSH 认证失败。仅重试下载、切换 Cargo 的 Git 客户端或禁用默认特性无法提供缺少的访问授权。
 - NSH 参考仓库的 `HEAD` 与锁定 SHA 一致，但 `git diff --stat HEAD` 显示 38 个已跟踪文件有工作区差异，包含 `Cargo.lock`。复核锁定版本时用 `git archive <SHA>` 读取提交树，避免把工作区补丁纳入验证。
 - 首次原生探针已经取得正确标题的 Win32 窗口句柄，但 .NET `WaitForInputIdle` 在控制台子系统可执行文件上抛出异常。探针改用 Windows 子系统，取证脚本直接用窗口句柄调用 `PrintWindow`。
+- 锁定 Rust 1.99.1 的 `wasm32-unknown-unknown` 下载在官方分发站受阻。`RUSTUP_USE_CURL=1` 报 schannel TLS 握手失败。取消该变量后，默认后端在下载 `rust-std` 时达到 100 秒时限。镜像副本应与 rustup 已锁定的 SHA-256 比对。
+- 中科大镜像的直连 `rustup` 下载仍未返回，取消该尝试。使用 `curl -4` 将公开分发文件下载到 `target/`。`sha256sum -c` 返回失败，但独立输出的 SHA-256 与 rustup 锁定值一致，因此改用 Python `hashlib` 比对实际字节。安装入口仍是 `rustup target add`，分发地址指向本地缓存。
+- 在 `nsh-platform-web` 私有模块调用 `rust_app!` 时，宏生成的 `pub` 初始化函数触发工作区的 `unreachable_pub`。在临时 crate 根重新导出 `nsh_app_init` 即可保留原 lint 与 WASM 导出。
+- Python Playwright 会给事件处理器附加属性。传入内建 `list.append` 会在事件注册时触发 `AttributeError`，使用 Python 函数即可。
 
 ## 失败计划
 
@@ -43,6 +47,8 @@
 - 路径测试夹具要使用宿主系统认可的绝对路径。Windows 上 `/tmp/...` 有根目录分隔符但缺盘符，`Path::is_absolute()` 仍为假。测试用带盘符的合成路径，无需创建目录或改动运行时路径规则。
 - `git_ops_safety` 的换行断言受 Git 客户端配置影响。测试仓库的 `Local` 配置层设 `core.autocrlf=false`，隔离宿主配置，并让原始字节断言保持有效。
 - NSH 锁定版本的 `examples/gallery-rs/native/src/main.rs` 使用 `AppSource::Rust(Root::of::<组件>())`。M1 原生探针复用该入口，作为 `nsh-platform-windows` 的 Cargo example 构建，直接使用锁定提交内的 `Cargo.lock`。
+- 锁定版本的 Web 探针可在 `nsh-platform-web` 的临时快照中编译 `rust_app!` 入口，随后用同版本 `nsh.js` 和 `player.runRust()` 挂载。Win32 与 Web 入口共同包含 `vibe-own-root.rs`。正式打包仍按 E1 独立验收。
+- 浏览器探针用已安装的 Chrome 与 Python Playwright。静态 HTTP 服务仅绑定回环地址和临时端口，WASM MIME、组件可见性与页面异常由脚本断言。
 
 ## 待确认假设
 
@@ -52,7 +58,8 @@
 
 ## 外部参考经验
 
--
+- [Ponytail](https://github.com/DietrichGebert/ponytail)（2026-11-18）：最小探针优先复用已有宿主和组件。下一轮先通过真实的现有 API 验证两端连通，再扩展 UI。
+- [SkillOpt](https://github.com/microsoft/SkillOpt)（2026-11-18）：按实测轨迹更新证据门。下一轮保留可复跑入口，并断言浏览器与原生窗口显示来自同一服务的工作区记录。
 
 ## 子代理发现
 

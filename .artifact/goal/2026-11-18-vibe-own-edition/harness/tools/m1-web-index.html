@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vibe-own | NSH M1</title>
+  <style>
+    #app { position: fixed; inset: 0; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { createPlayer } from "./nsh.js";
+
+    const player = await createPlayer(document.getElementById("app"), {
+      wasm: "./nsh.wasm",
+      dark: false,
+      onError: (message) => { throw new Error(message); },
+    });
+    player.runRust();
+  </script>
+</body>
+</html>

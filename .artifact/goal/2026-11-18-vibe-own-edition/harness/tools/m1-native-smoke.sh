@@ -15,9 +15,10 @@ snapshot="$(mktemp -d "$target/snapshot.XXXXXX")"
 trap 'rm -r -- "$snapshot"' EXIT
 
 git -C "$ref_repo" archive "$revision" | tar -xf - -C "$snapshot"
-example_dir="$snapshot/crates/nsh-platform-windows/examples"
+example_dir="$snapshot/crates/nsh-platform-windows/examples/vibe-own-smoke"
 mkdir -p "$example_dir"
-cp -- "$tools_dir/vibe-own-smoke.rs" "$example_dir/"
+cp -- "$tools_dir/vibe-own-smoke.rs" "$example_dir/main.rs"
+cp -- "$tools_dir/vibe-own-root.rs" "$example_dir/"
 
 export CARGO_TARGET_DIR="$(cygpath -am "$target/build")"
 log="$(mktemp "$repo/../.vk-m1-native-build.XXXXXX.log")"

@@ -5,9 +5,9 @@ artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: loop-002
-next_sub_goal: M1：用同一锁定 NSH 提交和同一个 Rust 根组件构建 Web 静态站点，在真实浏览器验证渲染并保存日志与截图。
-last_verified_loop: loop-002
+current_loop: loop-003
+next_sub_goal: M1：让 Win32 与 Web 探针通过真实本地 vibe server 的 HTTP API 读取并展示同一条工作区记录，保存两端截图和请求日志。
+last_verified_loop: loop-003
 termination_reason: null
 handoff_summary: null
 references: references.md

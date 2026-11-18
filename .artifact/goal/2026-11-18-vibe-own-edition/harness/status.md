@@ -1,6 +1,6 @@
 # 控制面板
 
-更新时间：2026-11-18（loop-002）
+更新时间：2026-11-18（loop-003）
 
 ## Plan
 
@@ -12,7 +12,7 @@
 | 里程碑 | 状态 | 下一步 |
 |---|---|---|
 | M0 基线 | in-progress | 公开工作区检查和测试通过。完整 check 等私有依赖访问，完整 lint 等 Clippy。 |
-| M1 NSH Spike | in-progress | Windows 最小 Rust 应用通过。下一步用相同根组件构建 Web 静态站点并在浏览器验证。 |
+| M1 NSH Spike | in-progress | 同一 Rust 根组件在 Win32 与 Chrome 渲染通过。下一步用真实本地 HTTP API 显示同一条工作区记录。 |
 | M2 本地议题底座 | pending | 可与 M1 并行 |
 | M3 设计系统 | pending | 依赖 M1 |
 | M4 Linear 交互 | pending | 依赖 M2、M3 |
@@ -22,18 +22,18 @@
 
 ## Run
 
-- 当前 loop：`loop-002`
-- 最近 eval `bash harness/tools/m1-native-smoke.sh`（路径相对于 Goal）退出 `0`，已查看原生窗口截图。
+- 当前 loop：`loop-003`
+- `bash harness/tools/m1-web-smoke.sh` 与 `bash harness/tools/m1-native-smoke.sh` 均退出 `0`。路径相对于 Goal。
 
 ## Gate
 
 - M0 已通过本地 Web 构建、公开 Rust 工作区检查与测试、前端类型检查和 lint、翻译键 lint。完整根 check/lint 分别受私有依赖认证和 Clippy 缺失阻塞。证据在 `../evidence/m0-build.md`。
-- M1 已通过锁定 NSH 提交的 Windows 最小构建与渲染。本轮使用 Rust 1.99.1。证据见 `../evidence/m1-native-build.md` 和 `../evidence/m1-native-window.png`。双端联通、滚动 p95 和真实 diff 仍待验证。
+- M1 在 Rust 1.99.1 和锁定 NSH 提交下完成原生窗口和静态站点渲染，见 `../evidence/m1-web-build.md`、`../evidence/m1-web-browser.png` 和 `../evidence/m1-native-window.png`。双端 HTTP 与实时流、滚动 p95、真实 diff、锁定 nightly 共编译仍待验证。
 
 ## Handoff
 
-- 已修复 Windows 下的绝对路径夹具和 Git 测试仓库换行夹具，工作区测试通过。
-- 下轮用同一锁定 NSH 提交与 Rust 根组件构建 Web 静态站点，获取浏览器截图。M0 的两项外部条件具备后，重跑完整 check 与 lint。
+- Win32 与 Web 入口共同编译 `harness/tools/vibe-own-root.rs`。Web 产物位于本机 `target/goal-m1-web/site.*`。
+- 下轮让两个平台入口通过同一真实本地 vibe server HTTP API 读取并显示同一条工作区记录。M0 的两项外部条件具备后，重跑完整 check 与 lint。
 
 ## 待人工决策
 
