@@ -27,6 +27,8 @@
 - `pnpm run check` 在 Windows 的默认 `cmd.exe` 脚本 shell 中无法运行 `./scripts/check-legacy-frontend-paths.sh`。排查脚本时先核对解释器和工作区换行，再分析 TypeScript 或 Rust 输出。
 - Clippy 是工具链组件。`pnpm run lint` 已运行两套前端 ESLint，随后因 `1.99.1` 缺少 `cargo-clippy.exe` 退出。`rustup component add` 未列入当前工具绑定。误启动的安装已在下载阶段取消，组件列表未变。
 - `crates/remote` 是独立工作区。虽然 `vk-billing` 不在默认特性中，完整 `pnpm run check` 照样在解析 `billing` 时尝试访问私有 Git 依赖。此次日志明确报 SSH 认证失败。仅重试下载、切换 Cargo 的 Git 客户端或禁用默认特性无法提供缺少的访问授权。
+- NSH 参考仓库的 `HEAD` 与锁定 SHA 一致，但 `git diff --stat HEAD` 显示 38 个已跟踪文件有工作区差异，包含 `Cargo.lock`。复核锁定版本时用 `git archive <SHA>` 读取提交树，避免把工作区补丁纳入验证。
+- 首次原生探针已经取得正确标题的 Win32 窗口句柄，但 .NET `WaitForInputIdle` 在控制台子系统可执行文件上抛出异常。探针改用 Windows 子系统，取证脚本直接用窗口句柄调用 `PrintWindow`。
 
 ## 失败计划
 
@@ -40,6 +42,7 @@
 - Windows 的 pnpm 用 `npm_config_script_shell="$(cygpath -w "$(type -P bash)")"` 指定 Git Bash。实测能保留根 `check` 的路径检查和后续步骤。
 - 路径测试夹具要使用宿主系统认可的绝对路径。Windows 上 `/tmp/...` 有根目录分隔符但缺盘符，`Path::is_absolute()` 仍为假。测试用带盘符的合成路径，无需创建目录或改动运行时路径规则。
 - `git_ops_safety` 的换行断言受 Git 客户端配置影响。测试仓库的 `Local` 配置层设 `core.autocrlf=false`，隔离宿主配置，并让原始字节断言保持有效。
+- NSH 锁定版本的 `examples/gallery-rs/native/src/main.rs` 使用 `AppSource::Rust(Root::of::<组件>())`。M1 原生探针复用该入口，作为 `nsh-platform-windows` 的 Cargo example 构建，直接使用锁定提交内的 `Cargo.lock`。
 
 ## 待确认假设
 

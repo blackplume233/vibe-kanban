@@ -5,9 +5,9 @@ artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: loop-001
-next_sub_goal: M1：在锁定的 NSH 版本上验证 Windows 最小原生应用能编译并启动，保存日志与窗口截图。
-last_verified_loop: loop-001
+current_loop: loop-002
+next_sub_goal: M1：用同一锁定 NSH 提交和同一个 Rust 根组件构建 Web 静态站点，在真实浏览器验证渲染并保存日志与截图。
+last_verified_loop: loop-002
 termination_reason: null
 handoff_summary: null
 references: references.md
