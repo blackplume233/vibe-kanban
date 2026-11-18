@@ -54,10 +54,15 @@ fn create_branch_from_head(repo: &Repository, name: &str) {
     let _ = repo.branch(name, &head, true).unwrap();
 }
 
-fn configure_user(repo: &Repository) {
-    let mut cfg = repo.config().unwrap();
+fn configure_fixture(repo: &Repository) {
+    let mut cfg = repo
+        .config()
+        .unwrap()
+        .open_level(git2::ConfigLevel::Local)
+        .unwrap();
     cfg.set_str("user.name", "Test User").unwrap();
     cfg.set_str("user.email", "test@example.com").unwrap();
+    cfg.set_bool("core.autocrlf", false).unwrap();
 }
 
 fn push_ref(repo: &Repository, local: &str, remote: &str) {
@@ -85,7 +90,7 @@ fn setup_repo_with_worktree(root: &TempDir) -> (PathBuf, PathBuf) {
         .expect("init repo");
 
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
 
     write_file(&repo_path, "common.txt", "base\n");
@@ -127,7 +132,7 @@ fn setup_conflict_repo_with_worktree(root: &TempDir) -> (PathBuf, PathBuf) {
         .expect("init repo");
 
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
 
     write_file(&repo_path, "conflict.txt", "base\n");
@@ -171,7 +176,7 @@ fn setup_no_unique_feature_repo(root: &TempDir) -> (PathBuf, PathBuf) {
         .expect("init repo");
 
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
 
     write_file(&repo_path, "base.txt", "main base\n");
@@ -207,7 +212,7 @@ fn setup_direct_conflict_repo(root: &TempDir) -> (PathBuf, PathBuf) {
         .expect("init repo");
 
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
 
     write_file(&repo_path, "conflict.txt", "base\n");
@@ -244,7 +249,7 @@ fn push_reports_non_fast_forward() {
         .initialize_repo_with_main_branch(&seed_path)
         .expect("init seed repo");
     let seed_repo = Repository::open(&seed_path).expect("open seed repo");
-    configure_user(&seed_repo);
+    configure_fixture(&seed_repo);
     seed_repo.remote("origin", remote_url).expect("add remote");
     push_ref(&seed_repo, "refs/heads/main", "refs/heads/main");
     Repository::open_bare(&remote_path)
@@ -255,7 +260,7 @@ fn push_reports_non_fast_forward() {
     // Local clone that will attempt the push later
     let local_path = temp_dir.path().join("local");
     let local_repo = Repository::clone(remote_url, &local_path).expect("clone local");
-    configure_user(&local_repo);
+    configure_fixture(&local_repo);
     checkout_branch(&local_repo, "main");
     write_file(&local_path, "file.txt", "initial local\n");
     commit_all(&local_repo, "initial local commit");
@@ -264,7 +269,7 @@ fn push_reports_non_fast_forward() {
     // Separate clone simulates someone else pushing first
     let updater_path = temp_dir.path().join("updater");
     let updater_repo = Repository::clone(remote_url, &updater_path).expect("clone updater");
-    configure_user(&updater_repo);
+    configure_fixture(&updater_repo);
     checkout_branch(&updater_repo, "main");
     write_file(&updater_path, "file.txt", "upstream change\n");
     commit_all(&updater_repo, "upstream commit");
@@ -304,7 +309,7 @@ fn fetch_with_missing_ref_returns_error() {
         .initialize_repo_with_main_branch(&seed_path)
         .expect("init seed repo");
     let seed_repo = Repository::open(&seed_path).expect("open seed repo");
-    configure_user(&seed_repo);
+    configure_fixture(&seed_repo);
     seed_repo.remote("origin", remote_url).expect("add remote");
     push_ref(&seed_repo, "refs/heads/main", "refs/heads/main");
     Repository::open_bare(&remote_path)
@@ -344,7 +349,7 @@ fn push_and_fetch_roundtrip_updates_tracking_branch() {
         .initialize_repo_with_main_branch(&seed_path)
         .expect("init seed repo");
     let seed_repo = Repository::open(&seed_path).expect("open seed repo");
-    configure_user(&seed_repo);
+    configure_fixture(&seed_repo);
     seed_repo.remote("origin", remote_url).expect("add remote");
     push_ref(&seed_repo, "refs/heads/main", "refs/heads/main");
     Repository::open_bare(&remote_path)
@@ -354,12 +359,12 @@ fn push_and_fetch_roundtrip_updates_tracking_branch() {
 
     let producer_path = temp_dir.path().join("producer");
     let producer_repo = Repository::clone(remote_url, &producer_path).expect("clone producer");
-    configure_user(&producer_repo);
+    configure_fixture(&producer_repo);
     checkout_branch(&producer_repo, "main");
 
     let consumer_path = temp_dir.path().join("consumer");
     let consumer_repo = Repository::clone(remote_url, &consumer_path).expect("clone consumer");
-    configure_user(&consumer_repo);
+    configure_fixture(&consumer_repo);
     checkout_branch(&consumer_repo, "main");
     let old_oid = consumer_repo
         .find_reference("refs/remotes/origin/main")
@@ -917,7 +922,7 @@ fn merge_refreshes_main_worktree_when_on_base() {
     let s = GitService::new();
     s.initialize_repo_with_main_branch(&repo_path).unwrap();
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
     // Baseline file
     write_file(&repo_path, "file.txt", "base\n");
@@ -950,7 +955,7 @@ fn sparse_checkout_respected_in_worktree_diffs_and_commit() {
     let s = GitService::new();
     s.initialize_repo_with_main_branch(&repo_path).unwrap();
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
     // baseline content
     write_file(&repo_path, "included/a.txt", "A\n");
@@ -998,7 +1003,7 @@ fn worktree_diff_ignores_commits_where_base_branch_is_ahead() {
     let s = GitService::new();
     s.initialize_repo_with_main_branch(&repo_path).unwrap();
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
 
     write_file(&repo_path, "shared.txt", "base\n");
@@ -1033,7 +1038,7 @@ fn init_repo_only_service(root: &TempDir) -> PathBuf {
     let s = GitService::new();
     s.initialize_repo_with_main_branch(&repo_path).unwrap();
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
     checkout_branch(&repo, "main");
     repo_path
 }
@@ -1174,7 +1179,7 @@ fn worktree_to_worktree_merge_leaves_no_staged_changes() {
         .initialize_repo_with_main_branch(&repo_path)
         .expect("init repo");
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
 
     write_file(&repo_path, "base.txt", "base content\n");
     commit_all(&repo, "initial commit");
@@ -1306,7 +1311,7 @@ fn merge_base_ahead_of_task_should_error() {
         .initialize_repo_with_main_branch(&repo_path)
         .expect("init repo");
     let repo = Repository::open(&repo_path).unwrap();
-    configure_user(&repo);
+    configure_fixture(&repo);
 
     // Initial commit on main
     write_file(&repo_path, "base.txt", "initial content\n");

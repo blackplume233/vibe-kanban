@@ -5,9 +5,9 @@ artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: null
-next_sub_goal: M0：补跑 cargo +1.99.1 test --workspace、pnpm run check、pnpm run lint，失败则修复或记录，证据写入 evidence/m0-build.md
-last_verified_loop: null
+current_loop: loop-001
+next_sub_goal: M1：在锁定的 NSH 版本上验证 Windows 最小原生应用能编译并启动，保存日志与窗口截图。
+last_verified_loop: loop-001
 termination_reason: null
 handoff_summary: null
 references: references.md

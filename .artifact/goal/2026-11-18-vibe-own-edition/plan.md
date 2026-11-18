@@ -24,7 +24,7 @@
 
 | ID | 可观察结果 | 预期证据 | 依赖 | 状态 |
 |---|---|---|---|---|
-| M0 基线 | fork 在 `my/main` 上完整构建通过；Goal 目录已提交 | E1 中的 cargo check/test、pnpm check/lint 日志；首个提交 hash | 网络、工具链 | in-progress（前端 build 与 `cargo +1.99.1 check --workspace` 已通过，见 `evidence/m0-build.md`；待 cargo test、pnpm check/lint、提交） |
+| M0 基线 | fork 在 `my/main` 上完整构建通过；Goal 目录已提交 | E1 中的 cargo check/test、pnpm check/lint 日志；首个提交 hash | 网络、工具链 | in-progress（本地 Web 构建、公开 Cargo 工作区检查与测试通过。完整 `pnpm check` 卡在私有 `billing` 依赖认证，完整 `pnpm lint` 卡在缺少 Clippy。见 `evidence/m0-build.md`） |
 | M1 NSH Spike（路线闸门） | `crates/nsh-app` 在 Windows 原生窗口与浏览器中都能列工作区、看会话日志流、显示 diff | 两端截图；`--fps` 日志；switch_trigger 逐项判定记录 | M0、D4（LLVM） | pending |
 | M2 本地议题底座 | 不设置 `VK_SHARED_API_BASE` 时议题 CRUD、状态、标签、子议题、关系全部在 SQLite 中可用；API 与类型生成通过 | 迁移 + `cargo test`；`generate-types:check`；API 调用记录 | M0、D1 | pending |
 | M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | M1 | pending |
@@ -34,6 +34,8 @@
 | M7 对等与退役 | NSH 功能覆盖 React 版；终端面板可用；React 前端与 `crates/remote` 从默认构建移除；原生与 Web 发布包 | E1、E7；发布包路径与 hash | M4、M5、M6 | pending |
 
 M5、M6 与 M3/M4 可并行（后端与 UI 互不阻塞）。
+
+M0 的公开工作区检查和测试已通过。私有依赖与 Clippy 的待决事项继续计入 M0，M1 可先验证锁定 NSH 版本的原生工具链和最小应用启动。M1 的双端、实时流、diff 和性能闸门仍按表验收。
 
 ## 终止规则
 

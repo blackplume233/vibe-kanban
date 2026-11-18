@@ -2762,6 +2762,12 @@ mod tests {
     use super::*;
     use crate::logs::utils::{EntryIndexProvider, patch::extract_normalized_entry_from_patch};
 
+    const TEST_WORKTREE: &str = if cfg!(windows) {
+        "C:/vk-test-worktree"
+    } else {
+        "/tmp/vk-test-worktree"
+    };
+
     fn patches_to_entries(patches: &[json_patch::Patch]) -> Vec<NormalizedEntry> {
         patches
             .iter()
@@ -2912,15 +2918,12 @@ mod tests {
     fn test_ls_tool_content_extraction() {
         // Test LS with path
         let ls_data = ClaudeToolData::LS {
-            path: "/tmp/test-worktree/components".to_string(),
+            path: format!("{TEST_WORKTREE}/components"),
         };
 
-        let action_type = ClaudeLogProcessor::extract_action_type(&ls_data, "/tmp/test-worktree");
-        let result = ClaudeLogProcessor::generate_concise_content(
-            &ls_data,
-            &action_type,
-            "/tmp/test-worktree",
-        );
+        let action_type = ClaudeLogProcessor::extract_action_type(&ls_data, TEST_WORKTREE);
+        let result =
+            ClaudeLogProcessor::generate_concise_content(&ls_data, &action_type, TEST_WORKTREE);
 
         assert_eq!(result, "List directory: components");
     }
@@ -2928,13 +2931,12 @@ mod tests {
     #[test]
     fn test_path_relative_conversion() {
         // Test with relative path (should remain unchanged)
-        let relative_result = make_path_relative("src/main.rs", "/tmp/test-worktree");
+        let relative_result = make_path_relative("src/main.rs", TEST_WORKTREE);
         assert_eq!(relative_result, "src/main.rs");
 
         // Test with absolute path (should become relative if possible)
-        let test_worktree = "/tmp/test-worktree";
-        let absolute_path = format!("{test_worktree}/src/main.rs");
-        let absolute_result = make_path_relative(&absolute_path, test_worktree);
+        let absolute_path = format!("{TEST_WORKTREE}/src/main.rs");
+        let absolute_result = make_path_relative(&absolute_path, TEST_WORKTREE);
         assert_eq!(absolute_result, "src/main.rs");
     }
 
@@ -3014,12 +3016,13 @@ mod tests {
             "message":{
                 "role":"assistant",
                 "content":[
-                    {"type":"tool_use","id":"t1","name":"create_file","input":{"path":"/tmp/work/src/new.txt","content":"hello"}}
+                    {"type":"tool_use","id":"t1","name":"create_file","input":{"path":"$WORKTREE/src/new.txt","content":"hello"}}
                 ]
             }
-        }"#;
-        let parsed: ClaudeJson = serde_json::from_str(assistant_with_create).unwrap();
-        let entries = normalize(&parsed, "/tmp/work");
+        }"#
+        .replace("$WORKTREE", TEST_WORKTREE);
+        let parsed: ClaudeJson = serde_json::from_str(&assistant_with_create).unwrap();
+        let entries = normalize(&parsed, TEST_WORKTREE);
         assert_eq!(entries.len(), 1);
         match &entries[0].entry_type {
             NormalizedEntryType::ToolUse { action_type, .. } => match action_type {
@@ -3035,12 +3038,13 @@ mod tests {
             "message":{
                 "role":"assistant",
                 "content":[
-                    {"type":"tool_use","id":"t2","name":"edit_file","input":{"path":"/tmp/work/README.md","old_str":"foo","new_str":"bar"}}
+                    {"type":"tool_use","id":"t2","name":"edit_file","input":{"path":"$WORKTREE/README.md","old_str":"foo","new_str":"bar"}}
                 ]
             }
-        }"#;
-        let parsed_edit: ClaudeJson = serde_json::from_str(assistant_with_edit).unwrap();
-        let entries = normalize(&parsed_edit, "/tmp/work");
+        }"#
+        .replace("$WORKTREE", TEST_WORKTREE);
+        let parsed_edit: ClaudeJson = serde_json::from_str(&assistant_with_edit).unwrap();
+        let entries = normalize(&parsed_edit, TEST_WORKTREE);
         assert_eq!(entries.len(), 1);
         match &entries[0].entry_type {
             NormalizedEntryType::ToolUse { action_type, .. } => match action_type {

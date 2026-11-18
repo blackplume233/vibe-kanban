@@ -24,6 +24,9 @@
 
 - 不要用 pnpm 9 安装本仓库（overrides 不生效）。
 - 不要并行运行两个 `rustup toolchain install`（锁竞争）。
+- `pnpm run check` 在 Windows 的默认 `cmd.exe` 脚本 shell 中无法运行 `./scripts/check-legacy-frontend-paths.sh`。排查脚本时先核对解释器和工作区换行，再分析 TypeScript 或 Rust 输出。
+- Clippy 是工具链组件。`pnpm run lint` 已运行两套前端 ESLint，随后因 `1.99.1` 缺少 `cargo-clippy.exe` 退出。`rustup component add` 未列入当前工具绑定。误启动的安装已在下载阶段取消，组件列表未变。
+- `crates/remote` 是独立工作区。虽然 `vk-billing` 不在默认特性中，完整 `pnpm run check` 照样在解析 `billing` 时尝试访问私有 Git 依赖。此次日志明确报 SSH 认证失败。仅重试下载、切换 Cargo 的 Git 客户端或禁用默认特性无法提供缺少的访问授权。
 
 ## 失败计划
 
@@ -32,6 +35,11 @@
 ## 有用模式
 
 - 网络下载步骤：低并发 + 重试循环 + 日志落文件（`../.vk-install.log`），避免长输出回灌。
+- `RUSTUP_TOOLCHAIN=1.99.1` 使 pnpm 根脚本内层的 `cargo` 也使用与独立 `cargo +1.99.1` 命令相同的工具链。
+- 根脚本使用 `&&`。首项失败后，只能把已经运行的子检查记为通过。可独立运行后续验证以收集证据，并保留根脚本的失败结论。
+- Windows 的 pnpm 用 `npm_config_script_shell="$(cygpath -w "$(type -P bash)")"` 指定 Git Bash。实测能保留根 `check` 的路径检查和后续步骤。
+- 路径测试夹具要使用宿主系统认可的绝对路径。Windows 上 `/tmp/...` 有根目录分隔符但缺盘符，`Path::is_absolute()` 仍为假。测试用带盘符的合成路径，无需创建目录或改动运行时路径规则。
+- `git_ops_safety` 的换行断言受 Git 客户端配置影响。测试仓库的 `Local` 配置层设 `core.autocrlf=false`，隔离宿主配置，并让原始字节断言保持有效。
 
 ## 待确认假设
 

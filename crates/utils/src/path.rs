@@ -135,22 +135,28 @@ mod tests {
 
     #[test]
     fn test_make_path_relative() {
+        let test_worktree = if cfg!(windows) {
+            "C:/vk-test-worktree"
+        } else {
+            "/tmp/vk-test-worktree"
+        };
+
         // Test with relative path (should remain unchanged)
         assert_eq!(
-            make_path_relative("src/main.rs", "/tmp/test-worktree"),
+            make_path_relative("src/main.rs", test_worktree),
             "src/main.rs"
         );
 
         // Test with absolute path (should become relative if possible)
-        let test_worktree = "/tmp/test-worktree";
         let absolute_path = format!("{test_worktree}/src/main.rs");
         let result = make_path_relative(&absolute_path, test_worktree);
         assert_eq!(result, "src/main.rs");
 
         // Test with path outside worktree (should return original)
+        let outside_path = format!("{test_worktree}-other/file.js");
         assert_eq!(
-            make_path_relative("/other/path/file.js", "/tmp/test-worktree"),
-            "/other/path/file.js"
+            make_path_relative(&outside_path, test_worktree),
+            outside_path
         );
     }
 
