@@ -27,7 +27,7 @@
 5. 执行。可以用子代理并行，但每个子代理必须在独立 worktree 里工作，写入范围互不重叠，由你负责整合。
 6. 验证：运行能覆盖改动的命令；UI 改动要在真实界面验证（原生窗口截图或浏览器截图）。证据存到 `GOAL/evidence/`，文件名带里程碑编号。
 7. 更新：loop 文件（方法、执行、验证、决策）、`plan.md` 里程碑状态、`references.md`（错误路径、有用模式）、`GOAL/harness/status.md` 控制面板。
-8. 提交到 `my/main`：显式列出路径，一个子目标一个提交，提交信息用 Conventional Commits。不要把与本轮无关的生成文件改动（如 `packages/local-web/src/routeTree.gen.ts`、`crates/tauri-app/gen/schemas/*`）带进提交，除非本轮确实需要它们。仓库文件一律 LF：提交前对每个暂存文件运行 `git diff --cached --stat` 与 `git diff --cached --ignore-cr-at-eol --stat` 对比，行数差异明显时说明混入了 CRLF，用 `git add --renormalize <path>` 修正（`core.autocrlf=true`，工作区 CRLF 没关系，入库必须 LF）。每轮结束都 `git push origin my/main`（失败就重试，网络问题记入 references.md，不阻塞下一轮）。
+8. 提交到 `my/main`：显式列出路径，一个子目标一个提交，提交信息用 Conventional Commits。不要把与本轮无关的生成文件改动（如 `packages/local-web/src/routeTree.gen.ts`、`crates/tauri-app/gen/schemas/*`）带进提交，除非本轮确实需要它们。仓库文件一律 LF：提交前对每个暂存文件运行 `git diff --cached --stat` 与 `git diff --cached --ignore-cr-at-eol --stat` 对比，行数差异明显时说明混入了 CRLF，用 `git add --renormalize <path>` 修正后**不带路径**执行 `git commit`（`git commit -- <path>` 会重新读取工作区的 CRLF 内容）。每轮结束都推送：`git -c http.sslBackend=openssl push origin my/main`，失败重试最多 6 次、间隔 15 秒（schannel 后端在本机经常 TLS 握手失败）；仍失败就记入 references.md，不阻塞下一轮。
 9. 用 `goal_state.py set` 写入新的 `next_sub_goal`，确认 `validate_goal_file.py --strict` 通过后结束。
 
 ## 决策规则
