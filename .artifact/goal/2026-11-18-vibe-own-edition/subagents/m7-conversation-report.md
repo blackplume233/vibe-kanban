@@ -6,7 +6,7 @@
 
 - `GET /api/sessions` 列出会话，`POST /api/sessions` 新建会话。Agent 选择读取 `/api/info` 的执行器配置。已有会话遵守服务端执行器绑定，新会话可选择执行器。
 - `POST /api/sessions/{id}/follow-up` 提交后续消息。当前会话有正在执行的操作时，通过 `POST /api/sessions/{id}/queue` 保存同会话后续消息，使用 `DELETE` 取消。全局 `/api/execution-queue` 按会话和执行进程 ID 关联，显示 SQLite 调度等待项及优先级。运行中的操作和 SQLite 调度等待项均调用既有执行进程停止端点。
-- 通过已有进程与归一化日志 WS 显示会话记录。审批 WS 的记录按运行中的执行进程归属过滤，批准与拒绝通过既有 `/api/approvals/{id}/respond` 提交。ACP 测试进程收到两种人工选择。问答型请求只显示等待状态，批准和拒绝仅适用于工具权限请求。
+- 通过已有进程与归一化日志 WS 显示会话记录。审批 WS 的记录按运行中的执行进程归属过滤，批准与拒绝通过既有 `/api/approvals/{id}/respond` 提交。ACP 测试进程收到两种人工选择。
 
 ## 取证
 
@@ -32,3 +32,11 @@ cargo +nightly-2026-08-01 test --manifest-path crates/nsh-app/Cargo.toml --locke
 ```
 
 证据用的 `conversation_smoke.rs`、`acp_fixture.py`、`live_conversation.py`、`site/` 及构建和服务日志位于 `F:/vk-targets/m7-conversation`。取证完成后从应用工作树移除了临时挂载入口和测试数据。共享应用根的正式接线由 M7 集成处理。
+
+## 会话代码评审与用户问答
+
+- 在已选会话中启动代码评审，默认包含工作区提交，并可填写附加说明。沿用该会话的 Agent 配置，通过 `POST /api/sessions/{id}/review` 提交。评审过程和结果显示在同一会话记录中。
+- 用户问答将审批 WS 与归一化日志中的审批 ID 和执行进程匹配。表单支持单选、多选和自定义答案，通过现有审批端点提交完整的 `answered` 结果。
+- 使用真实本地 `server.exe`、隔离 NSH 浏览器入口和本地 Codex app-server 协议测试进程。Chrome 核对两次评审请求及返回的 Git 上下文，分别使用「包含工作区提交＋附加说明」与「不包含提交＋空说明」。后续会话触发问答，在 UI 选择 `Rust` 并填写 `Short summary`，服务返回 `answered`，测试进程收到两项答案。Windows 下四项会话单测通过，包括多选与归一化问题解码。
+
+[评审表单](../evidence/m7-review-form.png) · [回答表单](../evidence/m7-review-question.png) · [提交结果](../evidence/m7-review-answered.png) · [浏览器请求日志](../evidence/m7-review-browser.txt)

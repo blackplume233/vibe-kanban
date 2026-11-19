@@ -1,0 +1,29 @@
+API GET /workspaces 200
+API DELETE /workspaces/9c74449d-09a0-472c-84d1-e065ea4c4671?delete_branches=true 202
+API GET /repos 200
+API POST /workspaces 200
+API POST /workspaces/cb41fc49-de18-4f60-90d1-5825e1e98338/repos 200
+API POST /sessions 200
+Chrome 157.0.8103.50 at 1180 × 900
+127.0.0.1 - - [20/Nov/2026 00:24:55] "GET /?backend_port=60989 HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:55] "GET /nsh.js HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:55] "GET /nsh-bindgen.js HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:55] "GET /nsh-bindgen_bg.wasm HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:56] "GET /api/workspaces HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:56] "GET /api/info HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:56] "GET /api/sessions?workspace_id=cb41fc49-de18-4f60-90d1-5825e1e98338 HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:56] "GET /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:56] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:57] "POST /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/review HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:57] "GET /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:57] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:58] "POST /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/review HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:58] "GET /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:58] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:59] "POST /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/follow-up HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:59] "GET /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:24:59] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:25:00] "POST /api/approvals/60887e1b-020d-4698-9148-d888c4f76cf7/respond HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:25:00] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 00:25:00] "GET /api/sessions/d3cf672c-d59e-4b96-901a-7b9cdd0e9652/queue HTTP/1.1" 200 -
+PASS: both review contexts, optional instructions, and structured question answers

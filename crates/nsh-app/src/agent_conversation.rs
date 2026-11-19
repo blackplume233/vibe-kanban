@@ -14,7 +14,10 @@ mod view;
 #[path = "agent_conversation_wire.rs"]
 mod wire;
 
-use wire::{Approval, Logs, Process, ProcessStatus, Profiles, QueueStatus, Scheduled, Session};
+use wire::{
+    Approval, Logs, Process, ProcessStatus, Profiles, QuestionAnswer, QueueStatus, Scheduled,
+    Session,
+};
 
 #[derive(Clone, Default, PartialEq)]
 struct Transcript {
@@ -41,6 +44,22 @@ struct SessionEditor {
     busy: bool,
     queue_revision: u64,
     notice: Option<(bool, String)>,
+    review: Option<ReviewDraft>,
+}
+
+#[derive(Clone, PartialEq)]
+struct ReviewDraft {
+    instructions: String,
+    use_all_workspace_commits: bool,
+}
+
+impl Default for ReviewDraft {
+    fn default() -> Self {
+        Self {
+            instructions: String::new(),
+            use_all_workspace_commits: true,
+        }
+    }
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -118,6 +137,28 @@ impl State {
                 .collect()
         })
     }
+
+    fn approval_disabled(self) -> bool {
+        self.approval_error.with(Option::is_some)
+            || self.with(|data| data.is_none_or(|data| data.editor.busy || !data.transcript.ready))
+    }
+
+    fn can_review(self) -> bool {
+        let Some(id) = self.selected.get() else {
+            return false;
+        };
+        let Some(session) = self.session(id.as_ref()) else {
+            return false;
+        };
+        self.with(|data| {
+            data.is_some_and(|data| {
+                data.can_review()
+                    && self
+                        .catalog
+                        .with(|catalog| data.executor(&session, catalog).is_some())
+            })
+        })
+    }
 }
 
 impl Conversation {
@@ -176,6 +217,17 @@ impl Conversation {
             && !self.editor.busy
             && self.queue.draft == QueueStatus::Empty
             && !self.editor.draft.trim().is_empty()
+    }
+
+    fn can_review(&self) -> bool {
+        self.transcript.ready
+            && self.queue.ready
+            && !self.editor.busy
+            && !self
+                .transcript
+                .processes
+                .iter()
+                .any(|process| process.status == ProcessStatus::Running)
     }
 }
 
@@ -497,6 +549,14 @@ enum Action {
         approval: Approval,
         approve: bool,
     },
+    Review {
+        executor: Value,
+        draft: ReviewDraft,
+    },
+    Answer {
+        approval: Approval,
+        answers: Vec<QuestionAnswer>,
+    },
 }
 
 fn submit(api: Api, state: State) {
@@ -516,6 +576,26 @@ fn submit(api: Api, state: State) {
             executor,
             queue: data.has_active_run(),
         })
+    });
+    if let Some(action) = action {
+        run_action(api, state, id, action);
+    }
+}
+
+fn submit_review(api: Api, state: State) {
+    let Some(id) = state.selected.get() else {
+        return;
+    };
+    let Some(session) = state.session(id.as_ref()) else {
+        return;
+    };
+    let action = state.with(|data| {
+        let data = data.filter(|data| data.can_review())?;
+        let draft = data.editor.review.clone()?;
+        let executor = state
+            .catalog
+            .with(|catalog| data.executor_config(&session, catalog))?;
+        Some(Action::Review { executor, draft })
     });
     if let Some(action) = action {
         run_action(api, state, id, action);
@@ -547,6 +627,9 @@ fn run_action(api: Api, state: State, id: SharedString, action: Action) {
                             && data.editor.draft == *prompt
                         {
                             data.editor.draft.clear();
+                        }
+                        if matches!(&action, Action::Review { .. }) {
+                            data.editor.review = None;
                         }
                         if let Some(draft) = result.draft {
                             data.queue.draft = draft;
@@ -614,6 +697,20 @@ impl Action {
                     .await?,
                 ),
             ),
+            Self::Review { executor, draft } => {
+                let instructions = draft.instructions.trim();
+                let process = wire::post(
+                    api,
+                    &format!("/api/sessions/{id}/review"),
+                    json!({
+                        "executor_config": executor,
+                        "additional_prompt": (!instructions.is_empty()).then_some(instructions),
+                        "use_all_workspace_commits": draft.use_all_workspace_commits,
+                    }),
+                )
+                .await?;
+                ("代码评审已提交", None, Some(process))
+            }
             Self::CancelDraft => (
                 "已取消排队消息",
                 Some(
@@ -633,19 +730,17 @@ impl Action {
             }
             Self::Respond { approval, approve } => {
                 let status = if *approve { "approved" } else { "denied" };
-                let result: Value = wire::post(
+                respond(api, approval, json!({"status": status})).await?;
+                (if *approve { "已批准" } else { "已拒绝" }, None, None)
+            }
+            Self::Answer { approval, answers } => {
+                respond(
                     api,
-                    &format!("/api/approvals/{}/respond", approval.approval_id),
-                    json!({
-                        "execution_process_id": approval.execution_process_id,
-                        "status": {"status": status}
-                    }),
+                    approval,
+                    json!({"status": "answered", "answers": answers}),
                 )
                 .await?;
-                if result["status"].as_str() != Some(status) {
-                    return Err("审批已失效或已由其他窗口处理".into());
-                }
-                (if *approve { "已批准" } else { "已拒绝" }, None, None)
+                ("回答已提交", None, None)
             }
         };
         Ok(ActionResult {
@@ -654,4 +749,20 @@ impl Action {
             process,
         })
     }
+}
+
+async fn respond(api: &Api, approval: &Approval, status: Value) -> Result<(), String> {
+    let result: Value = wire::post(
+        api,
+        &format!("/api/approvals/{}/respond", approval.approval_id),
+        json!({
+            "execution_process_id": approval.execution_process_id,
+            "status": status,
+        }),
+    )
+    .await?;
+    if result["status"] != status["status"] {
+        return Err("审批已失效或已由其他窗口处理".into());
+    }
+    Ok(())
 }

@@ -6,6 +6,9 @@ use super::{
 };
 use crate::api::Api;
 
+#[path = "agent_conversation_forms.rs"]
+mod forms;
+
 pub(super) fn panel(api: Api, workspace_id: String, state: State) -> impl IntoElement {
     view()
         .app_class(Some(
@@ -15,6 +18,7 @@ pub(super) fn panel(api: Api, workspace_id: String, state: State) -> impl IntoEl
             view()
                 .app_class(Some("flex-row items-center gap-2".into()))
                 .child(text("Agent 会话").app_class(Some("text-lg font-semibold flex-1".into())))
+                .child(forms::review_button(state))
                 .child(
                     action_button("重新连接", false)
                         .on_press(move || state.reconnect.update(|value| *value += 1)),
@@ -56,6 +60,7 @@ pub(super) fn panel(api: Api, workspace_id: String, state: State) -> impl IntoEl
                     .app_class(Some("flex-1 min-h-0 gap-3".into()))
                     .child(status_line(state))
                     .child(approvals(api.clone(), state))
+                    .child(forms::review_form(api.clone(), state))
                     .child(history(api.clone(), state))
                     .child(composer(api.clone(), state))
             },
@@ -199,7 +204,8 @@ fn status_line(state: State) -> impl IntoElement {
                     let Some(data) = data else {
                         return String::new();
                     };
-                    let approval_count = state.pending(&data.transcript, true).len();
+                    let approvals = state.pending(&data.transcript, true);
+                    let approval_count = approvals.len();
                     let scheduled_count = data.queue.scheduled.len()
                         + usize::from(data.queue.draft != QueueStatus::Empty);
                     let status = if !data.transcript.ready {
@@ -208,6 +214,8 @@ fn status_line(state: State) -> impl IntoElement {
                         } else {
                             "正在连接会话"
                         }
+                    } else if approvals.iter().any(|approval| approval.is_question) {
+                        "等待回答"
                     } else if approval_count > 0 {
                         "等待权限"
                     } else if data.has_active_run() {
@@ -268,6 +276,7 @@ fn approvals(api: Api, state: State) -> impl IntoElement {
         |approval| approval.approval_id.clone(),
         move |approval, _| {
             let question = move || approval.with(|approval| approval.is_question);
+            let api_question = api.clone();
             let api_approve = api.clone();
             let api_deny = api.clone();
             view()
@@ -298,23 +307,15 @@ fn approvals(api: Api, state: State) -> impl IntoElement {
                     })
                     .app_class(Some("text-xs text-muted-foreground".into())),
                 )
-                .child(when(question, || {
-                    text("请在支持问答的会话界面作答。")
-                        .app_class(Some("text-xs text-muted-foreground".into()))
+                .child(when(question, move || {
+                    forms::question_form(api_question.clone(), state, approval)
                 }))
                 .child(when(
                     move || !question(),
                     move || {
                         let approve_api = api_approve.clone();
                         let deny_api = api_deny.clone();
-                        let disabled = move || {
-                            state.approval_error.with(Option::is_some)
-                                || state.with(|data| {
-                                    data.is_none_or(|data| {
-                                        data.editor.busy || !data.transcript.ready
-                                    })
-                                })
-                        };
+                        let disabled = move || state.approval_disabled();
                         view()
                             .app_class(Some("flex-row gap-2".into()))
                             .child(action_button("批准", true).disabled(disabled).on_press(

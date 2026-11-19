@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::StreamExt;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 use crate::api::{Api, PatchFrame};
@@ -121,16 +121,45 @@ pub(super) struct QueuedDraft {
     pub executor_config: Value,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub(super) struct Question {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<QuestionOption>,
+    #[serde(rename = "multiSelect")]
+    pub multi_select: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub(super) struct QuestionOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct QuestionAnswer {
+    pub question: String,
+    pub answer: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PendingQuestions {
+    pub approval_id: String,
+    pub questions: Vec<Question>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct LogEntry {
     pub label: String,
     pub content: String,
     pub is_user: bool,
+    pub questions: Option<PendingQuestions>,
 }
 
 impl LogEntry {
     fn from_wire(value: Value) -> Option<Self> {
         let kind = value["type"].as_str()?;
+        let mut questions = None;
         let (label, content, is_user) = match kind {
             "STDOUT" => ("输出", value["content"].as_str()?, false),
             "STDERR" => ("标准错误", value["content"].as_str()?, false),
@@ -138,6 +167,20 @@ impl LogEntry {
                 let entry = &value["content"];
                 let meta = &entry["entry_type"];
                 let kind = meta["type"].as_str()?;
+                let action = &meta["action_type"];
+                let status = &meta["status"];
+                if kind == "tool_use"
+                    && action["action"] == "ask_user_question"
+                    && status["status"] == "pending_approval"
+                {
+                    questions = status["approval_id"].as_str().and_then(|id| {
+                        let questions = Vec::<Question>::deserialize(&action["questions"]).ok()?;
+                        (!questions.is_empty()).then(|| PendingQuestions {
+                            approval_id: id.to_owned(),
+                            questions,
+                        })
+                    });
+                }
                 let label = match kind {
                     "user_message" => "你",
                     "assistant_message" => "Agent",
@@ -155,10 +198,11 @@ impl LogEntry {
             _ => return None,
         };
         let content = content.trim_end_matches(['\r', '\n']);
-        (!content.is_empty()).then(|| Self {
+        (!content.is_empty() || questions.is_some()).then(|| Self {
             label: label.to_owned(),
             content: content.to_owned(),
             is_user,
+            questions,
         })
     }
 }
@@ -295,5 +339,25 @@ mod tests {
         apply_logs(&mut logs, patch);
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[&9].content, "one two");
+    }
+
+    #[test]
+    fn retains_pending_questions_without_log_text() {
+        let entry = LogEntry::from_wire(json!({"type": "NORMALIZED_ENTRY", "content": {
+            "content": "",
+            "entry_type": {
+                "type": "tool_use", "tool_name": "question",
+                "status": {"status": "pending_approval", "approval_id": "a"},
+                "action_type": {"action": "ask_user_question", "questions": [{
+                    "question": "Which checks?", "header": "Checks", "multiSelect": true,
+                    "options": [{"label": "Build", "description": "Compile the workspace"}]
+                }]}
+            }
+        }}))
+        .unwrap();
+        let pending = entry.questions.unwrap();
+        assert_eq!(pending.approval_id, "a");
+        assert!(pending.questions[0].multi_select);
+        assert_eq!(pending.questions[0].options[0].label, "Build");
     }
 }
