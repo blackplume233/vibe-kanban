@@ -1,0 +1,7 @@
+{
+  "name": "vibe-own",
+  "id": "io.vibe-own.desktop",
+  "version": "0.1.0",
+  "rust": ".",
+  "root": "PackagedApp"
+}

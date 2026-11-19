@@ -10,6 +10,9 @@ publish = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[features]
+# The CLI supplies its own Web entry point. Direct M1 WASM builds opt in.
+m1-web-smoke = []
 
 [[bin]]
 name = "vibe-own"
@@ -29,6 +32,18 @@ log = "=0.4.34"
 nsh-platform-windows = { git = "https://github.com/longbridge/nsh", rev = "12af3d778b588c2837267ff6aaed678eb5ad72a2", default-features = false }
 tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 env_logger = "=0.11.11"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+server = { path = "../server" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+# The CLI resolves a fresh workspace. Match the backend lock for widely
+# ranged dependencies whose newer releases fail to build on this graph.
+allocative = "=0.3.4"
+filetime = "=0.2.27"
+rama-error = "=0.3.0-alpha.4"
+rama-macros = "=0.3.0-alpha.4"
+rama-utils = "=0.3.0-alpha.4"
+russh-sftp = "=2.1.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 nsh-platform-web = { git = "https://github.com/longbridge/nsh", rev = "12af3d778b588c2837267ff6aaed678eb5ad72a2", default-features = false }

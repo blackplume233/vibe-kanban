@@ -3,9 +3,12 @@ use rust_embed::RustEmbed;
 
 const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
+/// Backend data directory. A nonempty `VK_ASSET_DIR` overrides the normal
+/// development and production locations (relative to the working directory).
 pub fn asset_dir() -> std::path::PathBuf {
     let path = if cfg!(debug_assertions) {
-        std::path::PathBuf::from(PROJECT_ROOT).join("../../dev_assets")
+        asset_dir_override()
+            .unwrap_or_else(|| std::path::PathBuf::from(PROJECT_ROOT).join("../../dev_assets"))
     } else {
         prod_asset_dir_path()
     };
@@ -22,10 +25,18 @@ pub fn asset_dir() -> std::path::PathBuf {
 }
 
 pub fn prod_asset_dir_path() -> std::path::PathBuf {
-    ProjectDirs::from("ai", "bloop", "vibe-kanban")
-        .expect("OS didn't give us a home directory")
-        .data_dir()
-        .to_path_buf()
+    asset_dir_override().unwrap_or_else(|| {
+        ProjectDirs::from("ai", "bloop", "vibe-kanban")
+            .expect("OS didn't give us a home directory")
+            .data_dir()
+            .to_path_buf()
+    })
+}
+
+fn asset_dir_override() -> Option<std::path::PathBuf> {
+    std::env::var_os("VK_ASSET_DIR")
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 pub fn config_path() -> std::path::PathBuf {
