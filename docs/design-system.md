@@ -137,7 +137,13 @@ node crates/nsh-app/design/generate-tokens.mjs --check
 | 补充 · 窄容器 | `win-narrow.png` | `web-narrow.png` | 900 × 720 逻辑点，中文长标题、单栏详情、编辑失败和连接异常。Win32 设为 150% 显示缩放，浏览器检查 125% 页面缩放，记录实际逻辑视口。 |
 | 补充 · 空态与减少动效 | `win-empty-reduced.png` | `web-empty-reduced.png` | 过滤无结果和清除按钮可见。另附交互记录，确认系统开关生效、浮层无位移、焦点在切换后可见。 |
 
-以应用 Git 提交、NSH 锁定提交、token 输入摘要、生成检查日志、启动及操作步骤索引截图，存入 Goal 的 `evidence/`。按相同检查项比较两端，允许字体栅格和原生窗口边框差异。补录 Win32 和浏览器的键盘焦点、中文 IME 提交、状态文字及减少动效检查，因为截图单独无法验证这些行为。M3 的实际生成日志和截图仍待集成取证。 [Goal E4][goal]
+以应用 Git 提交、NSH 锁定提交、token 输入摘要、生成检查日志、启动及操作步骤索引截图，存入 Goal 的 `evidence/`。按相同检查项比较两端，允许字体栅格和原生窗口边框差异。补录 Win32 和浏览器的键盘焦点、中文 IME 提交、状态文字及减少动效检查，因为截图单独无法验证这些行为。 [M3 截图与验证范围](../.artifact/goal/2026-11-18-vibe-own-edition/evidence/m3-showcase.md) · [Goal E4][goal]
+
+### 应用入口与 M7 打包
+
+共享组件位于 `crates/nsh-app/src/design_showcase.rs`。`root(ShowcaseOptions::default())` 安装当前默认主题和离线字体。`ShowcaseOptions::fixture(name)` 供两端截图入口选择同一组外观和内容。现有测试脚本使用正式应用的 Cargo 清单和锁文件，在目标目录生成证据入口。
+
+M7 打包流程读取 `design/tailwind.generated.json` 的 `appearance`、`theme` 与 `tailwind` 字段，并在执行 `nsh package` 前运行 `generate-tokens.mjs --check`。应用启动接线注册展示组件和主题资源。两个目标共享展示组件、主题和字体资源。
 
 ## M4 动作接入边界
 
