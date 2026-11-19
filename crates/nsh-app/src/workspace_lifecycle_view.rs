@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use nsh_base::{SelectItem, SelectValue, button, select};
-use nsh_core::element::input;
+use nsh_core::element::{input, scroll};
 
 use super::*;
 
@@ -9,10 +9,16 @@ const SELECT: &str = "w-full border border-input rounded-md bg-background px-2 m
 const FIELD: &str = "w-full border border-input rounded-md bg-background px-3 py-2 min-h-9 text-sm focus-visible:ring-2 focus-visible:ring-ring";
 
 pub(super) fn panel(api: Rc<Api>, state: State) -> impl IntoElement {
-    view()
+    scroll()
         .app_class(Some(
-            "flex-1 min-w-0 min-h-0 bg-card text-card-foreground p-4 gap-3 overflow-y-auto".into(),
+            "flex-1 min-w-0 min-h-0 bg-card text-card-foreground".into(),
         ))
+        .child(contents(api, state))
+}
+
+fn contents(api: Rc<Api>, state: State) -> impl IntoElement {
+    view()
+        .app_class(Some("min-w-0 p-4 gap-3".into()))
         .child(
             view()
                 .app_class(Some("flex-row flex-wrap items-center gap-2".into()))
