@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use workspace_utils::msg_store::MsgStore;
 
-pub use super::acp::AcpAgentHarness;
 use crate::{
     approvals::ExecutorApprovalService,
     command::{CmdOverrides, CommandBuildError, CommandBuilder, apply_overrides},
@@ -15,7 +14,7 @@ use crate::{
     executor_discovery::ExecutorDiscoveredOptions,
     executors::{
         AppendPrompt, AvailabilityInfo, BaseCodingAgent, ExecutorError, SpawnedChild,
-        StandardCodingAgentExecutor,
+        StandardCodingAgentExecutor, acp::AcpAgentHarnessV2,
     },
     logs::utils::patch,
     model_selector::{ModelInfo, ModelSelectorConfig, PermissionPolicy},
@@ -87,7 +86,7 @@ impl StandardCodingAgentExecutor for Gemini {
         prompt: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
-        let harness = AcpAgentHarness::new("gemini_sessions");
+        let harness = AcpAgentHarnessV2::new().with_client_transcript("gemini_sessions");
         let combined_prompt = self.append_prompt.combine_prompt(prompt);
         let gemini_command = self.build_command_builder()?.build_initial()?;
         let approvals = if self.yolo.unwrap_or(false) {
@@ -115,7 +114,7 @@ impl StandardCodingAgentExecutor for Gemini {
         _reset_to_message_id: Option<&str>,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
-        let harness = AcpAgentHarness::new("gemini_sessions");
+        let harness = AcpAgentHarnessV2::new().with_client_transcript("gemini_sessions");
         let combined_prompt = self.append_prompt.combine_prompt(prompt);
         let gemini_command = self.build_command_builder()?.build_follow_up(&[])?;
         let approvals = if self.yolo.unwrap_or(false) {

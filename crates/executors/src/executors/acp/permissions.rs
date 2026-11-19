@@ -12,7 +12,7 @@ use crate::{
     approvals::{ExecutorApprovalError, ExecutorApprovalService},
     executors::{
         CancellationToken,
-        acp::{AcpEvent, ApprovalResponse, to_v08},
+        acp::{AcpEvent, ApprovalResponse},
     },
 };
 
@@ -79,9 +79,7 @@ pub(crate) async fn ask_user(
     log_tx: &UnboundedSender<String>,
     denial_feedback: Arc<Mutex<Vec<String>>>,
 ) -> RequestPermissionResponse {
-    if let Some(event) = to_v08(req.clone()).map(AcpEvent::RequestPermission) {
-        send_event(log_tx, event);
-    }
+    send_event(log_tx, AcpEvent::RequestPermission(req.clone()));
 
     let tool_call_id = req.tool_call.tool_call_id.0.to_string();
     let tool_name = req.tool_call.fields.title.as_deref().unwrap_or("tool");

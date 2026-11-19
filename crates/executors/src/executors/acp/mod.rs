@@ -1,6 +1,4 @@
-pub mod client;
 pub mod discovery;
-pub mod harness;
 pub mod harness_v2;
 pub(super) mod mcp;
 pub mod normalize_logs;
@@ -11,11 +9,10 @@ pub mod session_config;
 
 use std::{fmt::Display, str::FromStr};
 
-pub use client::AcpClient;
-pub use harness::AcpAgentHarness;
+use acp::schema::v1;
 pub use harness_v2::AcpAgentHarnessV2;
 pub use normalize_logs::*;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 pub use session::SessionManager;
 use workspace_utils::approvals::ApprovalStatus;
 
@@ -26,18 +23,18 @@ use crate::logs::ExecutionTokenUsage;
 pub enum AcpEvent {
     User(String),
     SessionStart(String),
-    Message(agent_client_protocol::ContentBlock),
-    Thought(agent_client_protocol::ContentBlock),
-    ToolCall(agent_client_protocol::ToolCall),
-    ToolUpdate(agent_client_protocol::ToolCallUpdate),
-    Plan(agent_client_protocol::Plan),
-    AvailableCommands(Vec<agent_client_protocol::AvailableCommand>),
-    CurrentMode(agent_client_protocol::SessionModeId),
+    Message(v1::ContentBlock),
+    Thought(v1::ContentBlock),
+    ToolCall(v1::ToolCall),
+    ToolUpdate(v1::ToolCallUpdate),
+    Plan(v1::Plan),
+    AvailableCommands(Vec<v1::AvailableCommand>),
+    CurrentMode(v1::SessionModeId),
     /// Config in effect, a skipped setting, or a change the agent made itself
     /// ("Model: X · Mode: Agent · Permissions: Auto"). Shown as a system message.
     SessionConfig(String),
     Usage(AcpUsageUpdate),
-    RequestPermission(agent_client_protocol::RequestPermissionRequest),
+    RequestPermission(v1::RequestPermissionRequest),
     ApprovalRequested {
         tool_call_id: String,
         approval_id: String,
@@ -48,7 +45,7 @@ pub enum AcpEvent {
     AuthRequired(String),
     Error(String),
     Done(String),
-    Other(agent_client_protocol::SessionNotification),
+    Other(v1::SessionNotification),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,44 +78,35 @@ pub struct ApprovalResponse {
     pub status: ApprovalStatus,
 }
 
-// ---- TEMPORARY bridge: ACP 3.x types -> 0.8 types (same ACP v1 JSON shape).
-// ---- Delete when AcpEvent holds 3.x types.
-
-fn to_v08<T: Serialize, U: DeserializeOwned>(value: T) -> Option<U> {
-    serde_json::from_value(serde_json::to_value(value).ok()?).ok()
-}
-
-impl TryFrom<acp::schema::v1::SessionNotification> for AcpEvent {
+impl TryFrom<v1::SessionNotification> for AcpEvent {
     type Error = ();
 
-    fn try_from(notification: acp::schema::v1::SessionNotification) -> Result<Self, ()> {
-        use acp::schema::v1::SessionUpdate;
-        match notification.update {
-            SessionUpdate::AgentMessageChunk(chunk) => to_v08(chunk.content).map(AcpEvent::Message),
-            SessionUpdate::ToolCallUpdate(request) => to_v08(request).map(AcpEvent::ToolUpdate),
-            SessionUpdate::Plan(plan) => to_v08(plan).map(AcpEvent::Plan),
-            SessionUpdate::AgentThoughtChunk(cc) => to_v08(cc.content).map(AcpEvent::Thought),
-            SessionUpdate::ToolCall(tc) => to_v08(tc).map(AcpEvent::ToolCall),
-            SessionUpdate::AvailableCommandsUpdate(acu) => {
-                to_v08(acu.available_commands).map(AcpEvent::AvailableCommands)
+    fn try_from(notification: v1::SessionNotification) -> Result<Self, ()> {
+        use v1::SessionUpdate;
+
+        Ok(match notification.update {
+            SessionUpdate::AgentMessageChunk(chunk) => Self::Message(chunk.content),
+            SessionUpdate::AgentThoughtChunk(chunk) => Self::Thought(chunk.content),
+            SessionUpdate::ToolCall(call) => Self::ToolCall(call),
+            SessionUpdate::ToolCallUpdate(update) => Self::ToolUpdate(update),
+            SessionUpdate::Plan(plan) => Self::Plan(plan),
+            SessionUpdate::AvailableCommandsUpdate(update) => {
+                Self::AvailableCommands(update.available_commands)
             }
-            SessionUpdate::CurrentModeUpdate(cmu) => {
-                to_v08(cmu.current_mode_id).map(AcpEvent::CurrentMode)
-            }
-            SessionUpdate::UsageUpdate(usage) => Some(AcpEvent::Usage(AcpUsageUpdate::Context {
+            SessionUpdate::CurrentModeUpdate(update) => Self::CurrentMode(update.current_mode_id),
+            SessionUpdate::UsageUpdate(usage) => Self::Usage(AcpUsageUpdate::Context {
                 used: usage.used,
                 size: usage.size,
                 cost_usd: usage
                     .cost
                     .filter(|cost| cost.currency == "USD")
                     .map(|cost| cost.amount),
-            })),
+            }),
             _ => {
                 tracing::debug!("Unknown ACP Notification Update type {notification:?}");
-                None
+                return Err(());
             }
-        }
-        .ok_or(())
+        })
     }
 }
 
@@ -128,8 +116,42 @@ mod tests {
 
     use super::*;
 
-    fn notif(update: serde_json::Value) -> acp::schema::v1::SessionNotification {
+    fn notif(update: serde_json::Value) -> v1::SessionNotification {
         serde_json::from_value(json!({ "sessionId": "s1", "update": update })).unwrap()
+    }
+
+    #[test]
+    fn saved_event_lines_keep_their_external_tags_and_payloads() {
+        let saved = r#"{"Message":{"type":"text","text":"Checking files"}}
+{"ToolCall":{"toolCallId":"read-1","title":"Read README","kind":"read","locations":[{"path":"/repo/README.md","line":3}]}}
+{"ToolUpdate":{"toolCallId":"read-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Hello"}}]}}
+{"RequestPermission":{"sessionId":"s1","toolCall":{"toolCallId":"read-1","title":"Read README"},"options":[{"optionId":"once","name":"Allow once","kind":"allow_once"}]}}
+{"CurrentMode":"plan"}
+{"Usage":{"Context":{"used":12000,"size":200000,"cost_usd":0.125}}}
+{"Other":{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Check the README"}}}}"#;
+
+        for line in saved.lines() {
+            let event = line
+                .parse::<AcpEvent>()
+                .unwrap_or_else(|err| panic!("{line}: {err}"));
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::from_str::<serde_json::Value>(line).unwrap(),
+                "saved event: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn loads_legacy_null_options() {
+        let line =
+            r#"{"AvailableCommands":[{"name":"context","description":"Show usage","input":null}]}"#;
+        let AcpEvent::AvailableCommands(commands) = line.parse::<AcpEvent>().unwrap() else {
+            panic!("expected available commands");
+        };
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "context");
+        assert!(commands[0].input.is_none());
     }
 
     #[test]
@@ -194,14 +216,12 @@ mod tests {
     }
 
     #[test]
-    fn agent_message_text_survives_bridge() {
+    fn agent_message_maps_to_text() {
         let n = notif(json!({
             "sessionUpdate": "agent_message_chunk",
             "content": {"type": "text", "text": "Hello"}
         }));
-        let Ok(AcpEvent::Message(agent_client_protocol::ContentBlock::Text(text))) =
-            AcpEvent::try_from(n)
-        else {
+        let Ok(AcpEvent::Message(v1::ContentBlock::Text(text))) = AcpEvent::try_from(n) else {
             panic!("expected text Message");
         };
         assert_eq!(text.text, "Hello");

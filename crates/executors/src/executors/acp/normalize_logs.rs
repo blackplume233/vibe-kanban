@@ -1,17 +1,16 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
     time::Duration,
 };
 
-use agent_client_protocol::{self as acp, SessionNotification};
+use acp::schema::v1;
 use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 use workspace_utils::{approvals::ApprovalStatus, msg_store::MsgStore};
 
-pub use super::AcpAgentHarness;
 use super::{AcpEvent, AcpUsageUpdate};
 use crate::{
     approvals::ToolCallMetadata,
@@ -76,7 +75,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
     let worktree_path = worktree_path.to_path_buf();
     // Type aliases to simplify complex state types and appease clippy
     let h2 = tokio::spawn(async move {
-        type ToolStates = std::collections::HashMap<String, PartialToolCallData>;
+        type ToolStates = HashMap<Arc<str>, PartialToolCallData>;
 
         let mut stored_session_id = false;
         let mut streaming: StreamingState = StreamingState::default();
@@ -163,7 +162,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                     }
                     AcpEvent::Message(content) => {
                         streaming.thinking_text = None;
-                        if let agent_client_protocol::ContentBlock::Text(text) = content {
+                        if let v1::ContentBlock::Text(text) = content {
                             let is_new = streaming.assistant_text.is_none();
                             if is_new {
                                 if text.text == "\n" {
@@ -194,7 +193,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                     }
                     AcpEvent::Thought(content) => {
                         streaming.assistant_text = None;
-                        if let agent_client_protocol::ContentBlock::Text(text) = content {
+                        if let v1::ContentBlock::Text(text) = content {
                             let is_new = streaming.thinking_text.is_none();
                             if is_new {
                                 let idx = entry_index.next();
@@ -225,16 +224,23 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         streaming.thinking_text = None;
                         let todos: Vec<TodoItem> = plan
                             .entries
-                            .iter()
+                            .into_iter()
                             .map(|e| TodoItem {
-                                content: e.content.clone(),
-                                status: serde_json::to_value(&e.status)
-                                    .ok()
-                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-                                    .unwrap_or_else(|| "unknown".to_string()),
-                                priority: serde_json::to_value(&e.priority)
-                                    .ok()
-                                    .and_then(|v| v.as_str().map(|s| s.to_string())),
+                                content: e.content,
+                                status: match e.status {
+                                    v1::PlanEntryStatus::Pending => "pending",
+                                    v1::PlanEntryStatus::InProgress => "in_progress",
+                                    v1::PlanEntryStatus::Completed => "completed",
+                                    _ => "unknown",
+                                }
+                                .to_string(),
+                                priority: match e.priority {
+                                    v1::PlanEntryPriority::High => Some("high"),
+                                    v1::PlanEntryPriority::Medium => Some("medium"),
+                                    v1::PlanEntryPriority::Low => Some("low"),
+                                    _ => None,
+                                }
+                                .map(str::to_string),
                             })
                             .collect();
 
@@ -289,9 +295,9 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         msg_store.push_patch(ConversationPatch::add_normalized_entry(idx, entry));
                     }
                     AcpEvent::RequestPermission(perm) => {
-                        if let Ok(tc) = agent_client_protocol::ToolCall::try_from(perm.tool_call) {
-                            handle_tool_call(
-                                &tc,
+                        if perm.tool_call.fields.title.is_some() {
+                            handle_tool_update(
+                                perm.tool_call,
                                 &worktree_path,
                                 &mut streaming,
                                 &mut tool_states,
@@ -300,8 +306,8 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                             );
                         }
                     }
-                    AcpEvent::ToolCall(tc) => handle_tool_call(
-                        &tc,
+                    AcpEvent::ToolCall(tc) => handle_tool_update(
+                        tc.into(),
                         &worktree_path,
                         &mut streaming,
                         &mut tool_states,
@@ -309,32 +315,21 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         &msg_store,
                     ),
                     AcpEvent::ToolUpdate(update) => {
-                        let mut update = update;
-                        if update.fields.title.is_none() {
-                            update.fields.title = tool_states
-                                .get(&update.tool_call_id.0.to_string())
-                                .map(|s| s.title.clone())
-                                .or_else(|| Some("".to_string()));
-                        }
                         tracing::trace!("Got tool call update: {:?}", update);
-                        if let Ok(tc) = agent_client_protocol::ToolCall::try_from(update.clone()) {
-                            handle_tool_call(
-                                &tc,
-                                &worktree_path,
-                                &mut streaming,
-                                &mut tool_states,
-                                &entry_index,
-                                &msg_store,
-                            );
-                        } else {
-                            tracing::debug!("Failed to convert tool call update to ToolCall");
-                        }
+                        handle_tool_update(
+                            update,
+                            &worktree_path,
+                            &mut streaming,
+                            &mut tool_states,
+                            &entry_index,
+                            &msg_store,
+                        );
                     }
                     AcpEvent::ApprovalRequested {
                         tool_call_id,
                         approval_id,
                     } => {
-                        if let Some(tool_data) = tool_states.get(&tool_call_id) {
+                        if let Some(tool_data) = tool_states.get(tool_call_id.as_str()) {
                             let action = map_to_action_type(tool_data);
                             let entry = NormalizedEntry {
                                 timestamp: None,
@@ -353,7 +348,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                     AcpEvent::ApprovalResponse(resp) => {
                         tracing::trace!("Received approval response: {:?}", resp);
 
-                        if let Some(tool_data) = tool_states.get(&resp.tool_call_id) {
+                        if let Some(tool_data) = tool_states.get(resp.tool_call_id.as_str()) {
                             let new_status = LogToolStatus::from_approval_status(&resp.status);
                             if let Some(status) = new_status {
                                 let action = map_to_action_type(tool_data);
@@ -377,7 +372,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
 
                         if let ApprovalStatus::Denied { reason } = resp.status {
                             let tool_name = tool_states
-                                .get(&resp.tool_call_id)
+                                .get(resp.tool_call_id.as_str())
                                 .map(|t| {
                                     extract_tool_name_from_id(t.id.0.as_ref())
                                         .unwrap_or_else(|| t.title.clone())
@@ -407,8 +402,8 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
             }
         }
 
-        fn handle_tool_call(
-            tc: &agent_client_protocol::ToolCall,
+        fn handle_tool_update(
+            update: v1::ToolCallUpdate,
             worktree_path: &Path,
             streaming: &mut StreamingState,
             tool_states: &mut ToolStates,
@@ -417,20 +412,24 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
         ) {
             streaming.assistant_text = None;
             streaming.thinking_text = None;
-            let id = tc.tool_call_id.0.to_string();
-            let is_new = !tool_states.contains_key(&id);
-            let tool_data = tool_states.entry(id).or_default();
-            tool_data.extend(tc, worktree_path);
-            if is_new {
-                tool_data.index = entry_index.next();
-            }
+            let (tool_data, is_new) = match tool_states.entry(update.tool_call_id.0.clone()) {
+                Entry::Occupied(entry) => (entry.into_mut(), false),
+                Entry::Vacant(entry) => (
+                    entry.insert(PartialToolCallData::new(
+                        update.tool_call_id,
+                        entry_index.next(),
+                    )),
+                    true,
+                ),
+            };
+            tool_data.extend(update.fields, worktree_path);
             let action = map_to_action_type(tool_data);
             let entry = NormalizedEntry {
                 timestamp: None,
                 entry_type: NormalizedEntryType::ToolUse {
                     tool_name: tool_data.title.clone(),
                     action_type: action,
-                    status: convert_tool_status(&tool_data.status),
+                    status: convert_tool_status(tool_data.status),
                 },
                 content: get_tool_content(tool_data),
                 metadata: serde_json::to_value(ToolCallMetadata {
@@ -448,7 +447,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
 
         fn map_to_action_type(tc: &PartialToolCallData) -> ActionType {
             match tc.kind {
-                agent_client_protocol::ToolKind::Read => {
+                v1::ToolKind::Read => {
                     // Special-case: read_many_files style titles parsed via helper
                     if tc.id.0.starts_with("read_many_files") {
                         let result = collect_text_content(&tc.content).map(|text| ToolResult {
@@ -470,7 +469,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                             .to_string(),
                     }
                 }
-                agent_client_protocol::ToolKind::Edit => {
+                v1::ToolKind::Edit => {
                     let changes = extract_file_changes(tc);
                     ActionType::FileEdit {
                         path: tc
@@ -482,21 +481,20 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         changes,
                     }
                 }
-                agent_client_protocol::ToolKind::Execute => {
+                v1::ToolKind::Execute => {
                     let command = AcpEventParser::parse_execute_command(tc);
                     // Prefer structured raw_output, else fallback to aggregated text content
-                    let completed =
-                        matches!(tc.status, agent_client_protocol::ToolCallStatus::Completed);
+                    let completed = matches!(tc.status, v1::ToolCallStatus::Completed);
                     tracing::trace!(
                         "Mapping execute tool call, completed: {}, command: {}",
                         completed,
                         command
                     );
                     let tc_exit_status = match tc.status {
-                        agent_client_protocol::ToolCallStatus::Completed => {
+                        v1::ToolCallStatus::Completed => {
                             Some(crate::logs::CommandExitStatus::Success { success: true })
                         }
-                        agent_client_protocol::ToolCallStatus::Failed => {
+                        v1::ToolCallStatus::Failed => {
                             Some(crate::logs::CommandExitStatus::Success { success: false })
                         }
                         _ => None,
@@ -519,7 +517,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         category: CommandCategory::from_command(&command),
                     }
                 }
-                agent_client_protocol::ToolKind::Delete => ActionType::FileEdit {
+                v1::ToolKind::Delete => ActionType::FileEdit {
                     path: tc
                         .path
                         .clone()
@@ -528,7 +526,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         .to_string(),
                     changes: vec![FileChange::Delete],
                 },
-                agent_client_protocol::ToolKind::Search => {
+                v1::ToolKind::Search => {
                     let query = tc
                         .raw_input
                         .as_ref()
@@ -537,7 +535,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         .unwrap_or_else(|| tc.title.clone());
                     ActionType::Search { query }
                 }
-                agent_client_protocol::ToolKind::Fetch => {
+                v1::ToolKind::Fetch => {
                     let mut url = tc
                         .raw_input
                         .as_ref()
@@ -552,7 +550,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                     }
                     ActionType::WebFetch { url }
                 }
-                agent_client_protocol::ToolKind::Think => {
+                v1::ToolKind::Think => {
                     let tool_name = extract_tool_name_from_id(tc.id.0.as_ref())
                         .unwrap_or_else(|| tc.title.clone());
                     // For think/save_memory, surface both title and aggregated text content as arguments
@@ -578,12 +576,10 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         result,
                     }
                 }
-                agent_client_protocol::ToolKind::SwitchMode => ActionType::Other {
+                v1::ToolKind::SwitchMode => ActionType::Other {
                     description: "switch_mode".to_string(),
                 },
-                agent_client_protocol::ToolKind::Other
-                | agent_client_protocol::ToolKind::Move
-                | _ => {
+                _ => {
                     // Derive a friendlier tool name from the id if it looks like name-<digits>
                     let tool_name = extract_tool_name_from_id(tc.id.0.as_ref())
                         .unwrap_or_else(|| tc.title.clone());
@@ -621,7 +617,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
         fn extract_file_changes(tc: &PartialToolCallData) -> Vec<FileChange> {
             let mut changes = Vec::new();
             for c in &tc.content {
-                if let agent_client_protocol::ToolCallContent::Diff(diff) = c {
+                if let v1::ToolCallContent::Diff(diff) = c {
                     let path = diff.path.to_string_lossy().to_string();
                     let rel = if !path.is_empty() {
                         path
@@ -680,11 +676,9 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
 
         fn get_tool_content(tc: &PartialToolCallData) -> String {
             match tc.kind {
-                agent_client_protocol::ToolKind::Execute => {
-                    AcpEventParser::parse_execute_command(tc)
-                }
-                agent_client_protocol::ToolKind::Think => "Saving memory".to_string(),
-                agent_client_protocol::ToolKind::Other => {
+                v1::ToolKind::Execute => AcpEventParser::parse_execute_command(tc),
+                v1::ToolKind::Think => "Saving memory".to_string(),
+                v1::ToolKind::Other => {
                     let tool_name = extract_tool_name_from_id(tc.id.0.as_ref())
                         .unwrap_or_else(|| "tool".to_string());
                     if tc.title.is_empty() {
@@ -693,7 +687,7 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                         format!("{}: {}", tool_name, tc.title)
                     }
                 }
-                agent_client_protocol::ToolKind::Read => {
+                v1::ToolKind::Read => {
                     if tc.id.0.starts_with("read_many_files") {
                         "Read files".to_string()
                     } else {
@@ -728,13 +722,11 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
             URL_RE.find(text).map(|m| m.as_str().to_string())
         }
 
-        fn collect_text_content(
-            content: &[agent_client_protocol::ToolCallContent],
-        ) -> Option<String> {
+        fn collect_text_content(content: &[v1::ToolCallContent]) -> Option<String> {
             let mut out = String::new();
             for c in content {
-                if let agent_client_protocol::ToolCallContent::Content(inner) = c
-                    && let agent_client_protocol::ContentBlock::Text(t) = &inner.content
+                if let v1::ToolCallContent::Content(inner) = c
+                    && let v1::ContentBlock::Text(t) = &inner.content
                 {
                     out.push_str(&t.text);
                     if !out.ends_with('\n') {
@@ -745,12 +737,13 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
             if out.is_empty() { None } else { Some(out) }
         }
 
-        fn convert_tool_status(status: &agent_client_protocol::ToolCallStatus) -> LogToolStatus {
+        fn convert_tool_status(status: v1::ToolCallStatus) -> LogToolStatus {
             match status {
-                agent_client_protocol::ToolCallStatus::Pending
-                | agent_client_protocol::ToolCallStatus::InProgress => LogToolStatus::Created,
-                agent_client_protocol::ToolCallStatus::Completed => LogToolStatus::Success,
-                agent_client_protocol::ToolCallStatus::Failed => LogToolStatus::Failed,
+                v1::ToolCallStatus::Pending | v1::ToolCallStatus::InProgress => {
+                    LogToolStatus::Created
+                }
+                v1::ToolCallStatus::Completed => LogToolStatus::Success,
+                v1::ToolCallStatus::Failed => LogToolStatus::Failed,
                 _ => {
                     tracing::debug!("Unknown tool call status: {:?}", status);
                     LogToolStatus::Created
@@ -800,60 +793,63 @@ fn normalize_acp_stderr_logs(
 
 struct PartialToolCallData {
     index: usize,
-    id: agent_client_protocol::ToolCallId,
-    kind: agent_client_protocol::ToolKind,
+    id: v1::ToolCallId,
+    kind: v1::ToolKind,
     title: String,
-    status: agent_client_protocol::ToolCallStatus,
+    status: v1::ToolCallStatus,
     path: Option<PathBuf>,
-    content: Vec<agent_client_protocol::ToolCallContent>,
+    content: Vec<v1::ToolCallContent>,
     raw_input: Option<serde_json::Value>,
     raw_output: Option<serde_json::Value>,
 }
 
 impl PartialToolCallData {
-    fn extend(&mut self, tc: &agent_client_protocol::ToolCall, worktree_path: &Path) {
-        self.id = tc.tool_call_id.clone();
-        if tc.kind != Default::default() {
-            self.kind = tc.kind;
-        }
-        if !tc.title.is_empty() {
-            self.title = tc.title.clone();
-        }
-        if tc.status != Default::default() {
-            self.status = tc.status;
-        }
-        if !tc.locations.is_empty() {
-            self.path = tc.locations.first().map(|l| {
-                PathBuf::from(workspace_utils::path::make_path_relative(
-                    &l.path.to_string_lossy(),
-                    &worktree_path.to_string_lossy(),
-                ))
-            });
-        }
-        if !tc.content.is_empty() {
-            self.content = tc.content.clone();
-        }
-        if tc.raw_input.is_some() {
-            self.raw_input = tc.raw_input.clone();
-        }
-        if tc.raw_output.is_some() {
-            self.raw_output = tc.raw_output.clone();
-        }
-    }
-}
-
-impl Default for PartialToolCallData {
-    fn default() -> Self {
+    fn new(id: v1::ToolCallId, index: usize) -> Self {
         Self {
-            id: agent_client_protocol::ToolCallId::new(""),
-            index: 0,
-            kind: agent_client_protocol::ToolKind::default(),
+            id,
+            index,
+            kind: Default::default(),
             title: String::new(),
             status: Default::default(),
             path: None,
             content: Vec::new(),
             raw_input: None,
             raw_output: None,
+        }
+    }
+
+    fn extend(&mut self, fields: v1::ToolCallUpdateFields, worktree_path: &Path) {
+        // Keep the previously shown values when an update omits fields or sends defaults.
+        if let Some(kind) = fields.kind.filter(|kind| *kind != v1::ToolKind::default()) {
+            self.kind = kind;
+        }
+        if let Some(title) = fields.title.filter(|title| !title.is_empty()) {
+            self.title = title;
+        }
+        if let Some(status) = fields
+            .status
+            .filter(|status| *status != v1::ToolCallStatus::default())
+        {
+            self.status = status;
+        }
+        if let Some(location) = fields
+            .locations
+            .as_deref()
+            .and_then(|locations| locations.first())
+        {
+            self.path = Some(PathBuf::from(workspace_utils::path::make_path_relative(
+                &location.path.to_string_lossy(),
+                &worktree_path.to_string_lossy(),
+            )));
+        }
+        if let Some(content) = fields.content.filter(|content| !content.is_empty()) {
+            self.content = content;
+        }
+        if fields.raw_input.is_some() {
+            self.raw_input = fields.raw_input;
+        }
+        if fields.raw_output.is_some() {
+            self.raw_output = fields.raw_output;
         }
     }
 }
@@ -894,28 +890,6 @@ impl AcpEventParser {
     }
 }
 
-impl TryFrom<SessionNotification> for AcpEvent {
-    type Error = ();
-
-    fn try_from(notification: SessionNotification) -> Result<Self, ()> {
-        let event = match notification.update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => AcpEvent::Message(chunk.content),
-            acp::SessionUpdate::AgentThoughtChunk(chunk) => AcpEvent::Thought(chunk.content),
-            acp::SessionUpdate::ToolCall(tc) => AcpEvent::ToolCall(tc),
-            acp::SessionUpdate::ToolCallUpdate(update) => AcpEvent::ToolUpdate(update),
-            acp::SessionUpdate::Plan(plan) => AcpEvent::Plan(plan),
-            acp::SessionUpdate::AvailableCommandsUpdate(update) => {
-                AcpEvent::AvailableCommands(update.available_commands)
-            }
-            acp::SessionUpdate::CurrentModeUpdate(update) => {
-                AcpEvent::CurrentMode(update.current_mode_id)
-            }
-            _ => return Err(()),
-        };
-        Ok(event)
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct SearchArgs {
     query: String,
@@ -952,11 +926,12 @@ struct EditInput {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, json};
     use workspace_utils::log_msg::LogMsg;
 
     use super::*;
 
-    async fn entries_for(events: impl IntoIterator<Item = AcpEvent>) -> Vec<serde_json::Value> {
+    async fn patches_for(events: impl IntoIterator<Item = AcpEvent>) -> Vec<Value> {
         let msg_store = Arc::new(MsgStore::new());
         for event in events {
             msg_store.push_stdout(format!("{event}\n"));
@@ -973,26 +948,88 @@ mod tests {
                 _ => None,
             })
             .flat_map(|patch| patch.as_array().cloned().unwrap_or_default())
-            .map(|op| op["value"]["content"].clone())
             .collect()
     }
 
-    async fn errors_for(event: AcpEvent) -> Vec<serde_json::Value> {
-        entries_for([event])
+    async fn errors_for(event: AcpEvent) -> Vec<Value> {
+        patches_for([event])
             .await
             .into_iter()
+            .map(|mut op| op["value"]["content"].take())
             .filter(|entry| entry["entry_type"]["type"] == "error_message")
             .collect()
     }
 
     #[tokio::test]
+    async fn v1_tool_updates_reuse_the_entry_and_preserve_tool_details() {
+        let id = "execute-1";
+        let call = v1::ToolCall::new(id, "Print a greeting")
+            .kind(v1::ToolKind::Execute)
+            .raw_input(json!({"command": "echo greeting"}));
+        let permission = v1::RequestPermissionRequest::new(
+            v1::SessionId::new("s1"),
+            v1::ToolCallUpdate::new(
+                id,
+                v1::ToolCallUpdateFields::new().title("Print a greeting"),
+            ),
+            vec![v1::PermissionOption::new(
+                "once",
+                "Allow once",
+                v1::PermissionOptionKind::AllowOnce,
+            )],
+        );
+        let update = v1::ToolCallUpdate::new(
+            id,
+            v1::ToolCallUpdateFields::new()
+                .status(v1::ToolCallStatus::Completed)
+                .content(vec![v1::ToolCallContent::Content(v1::Content::new(
+                    v1::ContentBlock::Text(v1::TextContent::new("greeting")),
+                ))]),
+        );
+        let patches = patches_for([
+            AcpEvent::ToolCall(call),
+            AcpEvent::RequestPermission(permission),
+            AcpEvent::ApprovalRequested {
+                tool_call_id: id.into(),
+                approval_id: "approval-1".into(),
+            },
+            AcpEvent::ToolUpdate(update),
+        ])
+        .await;
+        let [created, permission, pending, completed] = patches.as_slice() else {
+            panic!("expected four tool patches, got {patches:?}");
+        };
+        assert_eq!(created["op"], "add");
+        assert_eq!(
+            created["value"]["content"]["entry_type"]["status"]["status"],
+            "created"
+        );
+        for patch in [permission, pending, completed] {
+            assert_eq!(patch["op"], "replace");
+            assert_eq!(patch["path"], created["path"]);
+        }
+        assert_eq!(
+            pending["value"]["content"]["entry_type"]["status"],
+            json!({"status": "pending_approval", "approval_id": "approval-1"})
+        );
+        let entry = &completed["value"]["content"];
+        let tool = &entry["entry_type"];
+        assert_eq!(entry["metadata"]["tool_call_id"], id);
+        assert_eq!(entry["content"], "echo greeting");
+        assert_eq!(tool["tool_name"], "Print a greeting");
+        assert_eq!(tool["status"]["status"], "success");
+        assert_eq!(tool["action_type"]["action"], "command_run");
+        assert_eq!(tool["action_type"]["result"]["output"], "greeting\n");
+    }
+
+    #[tokio::test]
     async fn context_and_billing_share_one_latest_usage_entry() {
-        let context = |used, cost_usd| {
-            AcpEvent::Usage(AcpUsageUpdate::Context {
-                used,
-                size: 200_000,
-                cost_usd,
-            })
+        let context = |used, cost: Option<v1::Cost>| {
+            AcpEvent::try_from(v1::SessionNotification::new(
+                v1::SessionId::new("s1"),
+                v1::SessionUpdate::UsageUpdate(v1::UsageUpdate::new(used, 200_000).cost(cost)),
+            ))
+            .unwrap()
         };
         let prompt = |input_tokens| {
             AcpEvent::Usage(AcpUsageUpdate::Prompt(crate::logs::ExecutionTokenUsage {
@@ -1001,21 +1038,27 @@ mod tests {
                 ..Default::default()
             }))
         };
-        let entries = entries_for([
+        let patches = patches_for([
             context(1000, None),
-            context(1500, Some(0.125)),
+            context(1500, Some(v1::Cost::new(0.125, "USD"))),
             prompt(400),
-            context(800, None),
+            context(800, Some(v1::Cost::new(5.0, "EUR"))),
             prompt(450),
         ])
         .await;
-        let context_only = &entries[0]["entry_type"];
+        assert_eq!(patches.len(), 5);
+        assert_eq!(patches[0]["op"], "add");
+        for patch in &patches[1..] {
+            assert_eq!(patch["op"], "replace");
+            assert_eq!(patch["path"], patches[0]["path"]);
+        }
+        let context_only = &patches[0]["value"]["content"]["entry_type"];
         assert_eq!(context_only["total_tokens"], 1000);
         assert!(context_only.get("billing").is_none());
-        let cost_only = &entries[1]["entry_type"]["billing"];
+        let cost_only = &patches[1]["value"]["content"]["entry_type"]["billing"];
         assert_eq!(cost_only["input_tokens"], 0);
         assert_eq!(cost_only["cost_usd"], 0.125);
-        let latest = &entries[4]["entry_type"];
+        let latest = &patches[4]["value"]["content"]["entry_type"];
         assert_eq!(latest["total_tokens"], 800);
         assert_eq!(latest["model_context_window"], 200_000);
         assert_eq!(latest["billing"]["input_tokens"], 450);

@@ -14,7 +14,8 @@ use crate::{
     executor_discovery::ExecutorDiscoveredOptions,
     executors::{
         AppendPrompt, AvailabilityInfo, BaseCodingAgent, ExecutorError, SpawnedChild,
-        StandardCodingAgentExecutor, gemini::AcpAgentHarness,
+        StandardCodingAgentExecutor,
+        acp::{AcpAgentHarnessV2, session_config::DesiredConfig},
     },
     logs::utils::patch,
     model_selector::{ModelSelectorConfig, PermissionPolicy},
@@ -54,6 +55,16 @@ impl QwenCode {
         builder = builder.extend_params(["--acp"]);
         apply_overrides(builder, &self.cmd)
     }
+
+    fn acp_harness(&self) -> AcpAgentHarnessV2 {
+        AcpAgentHarnessV2::new()
+            .with_client_transcript("qwen_sessions")
+            .with_config(DesiredConfig {
+                model: self.model.clone(),
+                mode: self.agent.clone(),
+                ..Default::default()
+            })
+    }
 }
 
 #[async_trait]
@@ -86,19 +97,12 @@ impl StandardCodingAgentExecutor for QwenCode {
     ) -> Result<SpawnedChild, ExecutorError> {
         let qwen_command = self.build_command_builder()?.build_initial()?;
         let combined_prompt = self.append_prompt.combine_prompt(prompt);
-        let mut harness = AcpAgentHarness::new("qwen_sessions");
-        if let Some(model) = &self.model {
-            harness = harness.with_model(model);
-        }
-        if let Some(agent) = &self.agent {
-            harness = harness.with_mode(agent);
-        }
         let approvals = if self.yolo.unwrap_or(false) {
             None
         } else {
             self.approvals.clone()
         };
-        harness
+        self.acp_harness()
             .spawn_with_command(
                 current_dir,
                 combined_prompt,
@@ -120,19 +124,12 @@ impl StandardCodingAgentExecutor for QwenCode {
     ) -> Result<SpawnedChild, ExecutorError> {
         let qwen_command = self.build_command_builder()?.build_follow_up(&[])?;
         let combined_prompt = self.append_prompt.combine_prompt(prompt);
-        let mut harness = AcpAgentHarness::new("qwen_sessions");
-        if let Some(model) = &self.model {
-            harness = harness.with_model(model);
-        }
-        if let Some(agent) = &self.agent {
-            harness = harness.with_mode(agent);
-        }
         let approvals = if self.yolo.unwrap_or(false) {
             None
         } else {
             self.approvals.clone()
         };
-        harness
+        self.acp_harness()
             .spawn_follow_up_with_command(
                 current_dir,
                 combined_prompt,
