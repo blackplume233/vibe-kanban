@@ -909,6 +909,52 @@ sdp: string,
  */
 session_id: string, };
 
+export type CreateLocalProject = { name: string, };
+
+export type IssuePriority = "urgent" | "high" | "medium" | "low";
+
+export type Issue = { id: string, project_id: string, issue_number: number, simple_id: string, status_id: string, title: string, description: string | null, priority: IssuePriority | null, start_date: string | null, target_date: string | null, sort_order: number, parent_issue_id: string | null, cycle_id: string | null, triage: boolean, extension_metadata: unknown, external_provider: string | null, external_id: string | null, external_url: string | null, tag_ids: Array<string>, created_at: Date, updated_at: Date, };
+
+export type CreateIssue = { title: string, status_id: string, description?: string, priority?: IssuePriority, start_date?: string, target_date?: string, sort_order?: number, parent_issue_id?: string, cycle_id?: string, triage?: boolean, extension_metadata?: unknown, external_provider?: string, external_id?: string, external_url?: string, tag_ids?: Array<string>, };
+
+export type UpdateIssue = { title?: string, status_id?: string, description?: string | null, priority?: IssuePriority | null, start_date?: string | null, target_date?: string | null, sort_order?: number, parent_issue_id?: string | null, cycle_id?: string | null, triage?: boolean, extension_metadata?: unknown, external_provider?: string | null, external_id?: string | null, external_url?: string | null, tag_ids?: Array<string>, };
+
+export type IssueBatchUpdate = { issue_id: string, changes: UpdateIssue, };
+
+export type IssueFilter = { search?: string, status_id?: string, status_category?: IssueStatusCategory, priority?: IssuePriority, tag_id?: string, parent_issue_id?: string, root_only?: boolean, cycle_id?: string, triage?: boolean, external_provider?: string, external_id?: string, start_on_or_after?: string, target_on_or_before?: string, };
+
+export type IssueStatusCategory = "backlog" | "unstarted" | "started" | "completed" | "canceled";
+
+export type IssueStatus = { id: string, project_id: string, name: string, color: string, category: IssueStatusCategory, sort_order: number, };
+
+export type SaveIssueStatus = { name: string, color: string, category: IssueStatusCategory, };
+
+export type ReorderIssueStatuses = { status_ids: Array<string>, };
+
+export type IssueTag = { id: string, project_id: string, name: string, color: string, };
+
+export type SaveIssueTag = { name: string, color: string, };
+
+export type IssueCycle = { id: string, project_id: string, name: string, start_date: string, end_date: string, };
+
+export type SaveIssueCycle = { name: string, start_date: string, end_date: string, };
+
+export type IssueSavedView = { id: string, project_id: string, name: string, filter: Record<string, unknown>, };
+
+export type SaveIssueView = { name: string, filter: Record<string, unknown>, };
+
+export type IssueRelationshipType = "blocking" | "related" | "duplicate";
+
+export type IssueRelationship = { id: string, project_id: string, issue_id: string, related_issue_id: string, relationship_type: IssueRelationshipType, created_at: Date, };
+
+export type CreateIssueRelationship = { related_issue_id: string, relationship_type: IssueRelationshipType, };
+
+export type IssueComment = { id: string, project_id: string, issue_id: string, parent_id: string | null, message: string, created_at: Date, updated_at: Date, };
+
+export type CreateIssueComment = { message: string, parent_id?: string, };
+
+export type UpdateIssueComment = { message: string, };
+
 export const DEFAULT_PR_DESCRIPTION_PROMPT = "Update the PR that was just created with a better title and description.\nThe PR number is #{pr_number} and the URL is {pr_url}.\n\nAnalyze the changes in this branch and write:\n1. A concise, descriptive title that summarizes the changes, postfixed with \"(Vibe Kanban)\"\n2. A detailed description that explains:\n   - What changes were made\n   - Why they were made (based on the task context)\n   - Any important implementation details\n   - At the end, include a note: \"This PR was written using [Vibe Kanban](https://vibekanban.com)\"\n\nUse the appropriate CLI tool to update the PR (gh pr edit for GitHub, az repos pr update for Azure DevOps).";
 
 export const DEFAULT_COMMIT_REMINDER_PROMPT = "There are uncommitted changes. Please stage and commit them now with a descriptive commit message.";
