@@ -17,3 +17,12 @@
 ## 集成边界
 
 本次证据覆盖两个模块。M1 所属 crate 入口在集成时声明 `issue_actions` 与 `command_search`。NSH 根组件把实际键位、菜单与拖放事件转成 `Invocation`，在处理器内接入确认、HTTP 提交、乐观更新和回滚。Goal 的 E2/E3 仍需要真实界面的端到端操作、焦点和输入法检查，以及滚动与冷启动性能取证。Goal 目标和验收门无需修订。
+
+## 议题 API 与看板状态
+
+- `issues_api.rs` 复用 M1 的 NSH `fetch` 和响应封装。覆盖项目列表与创建、议题列表筛选与增删改查、批量 PATCH、子议题列表及创建、关系列表及增删、状态 CRUD 及重排，以及标签、cycle 和保存视图 CRUD。共享 HTTP 解码支持删除响应的 `data: null`，并将 M2 的错误消息传给调用方。
+- `BoardState::dispatch` 通过已交付的动作派发校验处理新建、移动和编辑。移动按完整项目快照中的最新目标列和锚点排序。相邻排序值相同或没有可表示的中点时，通过一次 M2 批量 PATCH 重排列。一次仅提交一项看板变更，避免排序批次和字段编辑互相覆盖。
+- `Submission::execute` 单独持有待提交的请求。`BoardState::finish` 用服务器返回记录更新状态，失败时只回滚本次变更的字段，并返回原焦点锚点。新建议题在服务器返回 ID 后加入看板。刷新版本与提交标识分别防止旧快照和其他看板的响应覆盖本地状态。选中项和滚动锚点均使用议题 ID。
+- Windows 上运行 `CARGO_TARGET_DIR=F:/vk-targets/m4 cargo +1.99.1 test --offline --locked --manifest-path crates/nsh-app/Cargo.toml --lib`，19 项通过。新测试覆盖百分号与中文查询编码、PATCH 的省略与显式清空、删除响应、失效落点、隐含相邻议题、批量回滚、服务端 ID、错误响应和焦点锚点。
+- 配置 Goal 的 LLVM 环境后，`CARGO_TARGET_DIR=F:/vk-targets/m4/web cargo +1.99.1 check --offline --locked --manifest-path crates/nsh-app/Cargo.toml --lib --target wasm32-unknown-unknown` 通过。
+- NSH 界面接入时，从 `BoardEffect` 读取导航意图或启动异步提交，在请求成功、失败或取消时调用 `finish`。真实界面操作和性能验收属于下一切片。

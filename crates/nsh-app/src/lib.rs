@@ -5,6 +5,13 @@ mod app;
 #[cfg(any(windows, target_arch = "wasm32"))]
 mod socket;
 
+pub mod board_state;
+pub mod command_search;
+pub mod issue_actions;
+pub mod issues_api;
+
+#[cfg(any(windows, target_arch = "wasm32"))]
+pub use api::Api;
 #[cfg(any(windows, target_arch = "wasm32"))]
 pub use app::App;
 

@@ -1,14 +1,17 @@
 use std::{collections::HashSet, rc::Rc};
 
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
-use nsh_core::prelude::*;
-use serde::{Deserialize, de::DeserializeOwned};
+use nsh_core::{platform::HttpRequest, prelude::*};
+use serde::{
+    Deserialize, Deserializer,
+    de::{DeserializeOwned, IgnoredAny},
+};
 use serde_json::json;
 
 use crate::socket;
 
 #[derive(Clone)]
-pub(crate) struct Api {
+pub struct Api {
     http: String,
     ws: String,
 }
@@ -32,10 +35,40 @@ struct Session {
 }
 
 #[derive(Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct Envelope<T> {
     success: bool,
+    #[serde(default, deserialize_with = "present_data")]
     data: Option<T>,
     message: Option<String>,
+}
+
+fn present_data<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+fn decode_response<T: DeserializeOwned>(path: &str, status: u16, body: &[u8]) -> Result<T, String> {
+    if !(200..300).contains(&status) {
+        return Err(response_message(body).unwrap_or_else(|| format!("{path}: HTTP {status}")));
+    }
+    let envelope = serde_json::from_slice::<Envelope<T>>(body)
+        .map_err(|error| response_message(body).unwrap_or_else(|| format!("{path}: {error}")))?;
+    if !envelope.success {
+        return Err(envelope
+            .message
+            .unwrap_or_else(|| format!("{path}: request failed")));
+    }
+    envelope
+        .data
+        .ok_or_else(|| format!("{path}: response has no data"))
+}
+
+fn response_message(body: &[u8]) -> Option<String> {
+    serde_json::from_slice::<Envelope<IgnoredAny>>(body)
+        .ok()?
+        .message
 }
 
 #[derive(Deserialize)]
@@ -71,7 +104,7 @@ type Files = Vec<(String, Rc<Diff>)>;
 
 impl Api {
     #[cfg(windows)]
-    pub(crate) fn local() -> Self {
+    pub fn local() -> Self {
         let port = std::env::var("BACKEND_PORT")
             .ok()
             .and_then(|port| port.parse::<u16>().ok())
@@ -83,7 +116,7 @@ impl Api {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn local() -> Self {
+    pub fn local() -> Self {
         let location = web_sys::window().expect("browser window").location();
         let http = location.origin().expect("browser origin");
         // The smoke site proxies read-only HTTP paths. Its WS connects directly
@@ -100,21 +133,24 @@ impl Api {
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, String> {
-        let response = fetch(format!("{}{}", self.http, path)).await?;
-        if !response.ok() {
-            return Err(format!("{path}: HTTP {}", response.status()));
+        self.request("GET", path, None).await
+    }
+
+    pub(crate) async fn request<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<T, String> {
+        let mut request = HttpRequest::new(method, format!("{}{}", self.http, path));
+        if let Some(body) = body {
+            request = request
+                .header("Content-Type", "application/json")
+                .body(body);
         }
-        let envelope: Envelope<T> =
-            serde_json::from_slice(&response.body).map_err(|e| e.to_string())?;
-        if !envelope.success {
-            return Err(envelope
-                .message
-                .unwrap_or_else(|| format!("{path}: request failed")));
-        }
-        let data = envelope
-            .data
-            .ok_or_else(|| format!("{path}: response has no data"))?;
-        log::info!("HTTP 200 {path}");
+        let response = fetch(request).await?;
+        let data = decode_response(path, response.status(), &response.body)?;
+        log::info!("HTTP {} {path}", response.status());
         Ok(data)
     }
 
@@ -289,6 +325,25 @@ fn apply_diff_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deletes_accept_explicit_null_and_preserve_error_messages() {
+        let path = "/api/projects/p/issues/i";
+        assert_eq!(
+            decode_response::<()>(path, 200, br#"{"success":true,"data":null}"#),
+            Ok(())
+        );
+        assert!(decode_response::<()>(path, 200, br#"{"success":true}"#).is_err());
+        let error = br#"{"success":false,"data":null,"message":"invalid status"}"#;
+        assert_eq!(
+            decode_response::<String>(path, 400, error),
+            Err("invalid status".into())
+        );
+        assert_eq!(
+            decode_response::<String>(path, 200, error),
+            Err("invalid status".into())
+        );
+    }
 
     #[test]
     fn diff_snapshots_upsert_the_repo_and_keep_incremental_updates() {
