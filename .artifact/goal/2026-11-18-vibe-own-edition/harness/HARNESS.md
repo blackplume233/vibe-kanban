@@ -17,8 +17,8 @@
 |---|---|---|
 | 读代码、文档、日志 | omp 读/搜索工具、git log/diff | 无限制 |
 | 写代码与 Goal 文件 | omp 编辑/写工具 | 仅限 vibe-kanban 仓库与子代理的隔离 worktree |
-| 本地提交 | `git commit` 或 eval `commit` 命名空间 | 只提交到 `my/main`；显式列出路径 |
-| 推送 | `git push origin my/<branch>` | 禁止 `upstream`、禁止 `--force` |
+| 本地提交 | eval `commit` 命名空间 | 子 agent 各自负责独立 worktree 的本地提交，协调者负责集成分支 |
+| 推送 | `git push origin my/main` | M0–M7 和 E1–E7 全部通过并完成终止审计后推送 |
 | 安装用户级工具链 | `rustup target add`、`cargo install`、`pnpm` | 允许；系统级软件（MSI、winget）未授权 |
 | GitHub 远端写（建仓库、开 PR、建 Issue、配 webhook、改设置） | 无 | 未授权；记入 `status.md` 的「待人工决策」 |
 

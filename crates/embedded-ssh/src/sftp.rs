@@ -371,14 +371,14 @@ impl russh_sftp::server::Handler for SftpHandler {
         path: String,
         attrs: FileAttributes,
     ) -> Result<Status, Self::Error> {
+        #[cfg(unix)]
         if let Some(perms) = attrs.permissions {
-            #[cfg(unix)]
             fs::set_permissions(&path, std_fs::Permissions::from_mode(perms))
                 .await
                 .map_err(SftpError::from)?;
-            #[cfg(not(unix))]
-            let _ = perms;
         }
+        #[cfg(not(unix))]
+        let _ = (path, attrs);
 
         Ok(self.ok_status(id))
     }
