@@ -14,7 +14,8 @@
     import { createPlayer } from "./nsh.js";
 
     const player = await createPlayer(document.getElementById("app"), {
-      wasm: "./nsh.wasm",
+      wasm: "./nsh-bindgen_bg.wasm",
+      glue: "./nsh-bindgen.js",
       dark: false,
       onError: (message) => { throw new Error(message); },
     });

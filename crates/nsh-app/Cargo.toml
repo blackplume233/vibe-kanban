@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+
+[package]
+name = "vibe-own-nsh"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+
+[[bin]]
+name = "vibe-own"
+path = "src/main.rs"
+
+[dependencies]
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "12af3d778b588c2837267ff6aaed678eb5ad72a2" }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "12af3d778b588c2837267ff6aaed678eb5ad72a2", default-features = false, features = ["editor", "highlight"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+json-patch = "=3.0.1"
+futures-channel = "=0.3.34"
+futures-util = "=0.3.34"
+log = "=0.4.34"
+
+[target.'cfg(windows)'.dependencies]
+nsh-platform-windows = { git = "https://github.com/longbridge/nsh", rev = "12af3d778b588c2837267ff6aaed678eb5ad72a2", default-features = false }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
+env_logger = "=0.11.11"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+nsh-platform-web = { git = "https://github.com/longbridge/nsh", rev = "12af3d778b588c2837267ff6aaed678eb5ad72a2", default-features = false }
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "=0.3.106", features = ["Event", "Location", "MessageEvent", "WebSocket", "Window"] }
+
+[profile.release]
+lto = "thin"
