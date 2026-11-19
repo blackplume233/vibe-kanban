@@ -1,0 +1,110 @@
+{
+  "raf": {
+    "intervals": 491,
+    "p50_ms": 18.5,
+    "p95_ms": 19.5,
+    "max_ms": 20.100000000000136,
+    "baseline_period_ms": 18.699999999999818,
+    "gap_threshold_ms": 28.049999999999727,
+    "gaps_at_least_1_5_periods": 0,
+    "estimated_missed_ticks": 0,
+    "first_row_before": "VO-2 M4 Keyboard neighbor",
+    "first_row_after": "VO-302 M4 Load issue 0297",
+    "wheel_events": 100,
+    "wheel_delta_px": 132,
+    "wheel_pause_ms": 50
+  },
+  "raf_intervals": 491,
+  "clock_baseline": {
+    "intervals": 384,
+    "p50_ms": 18.699999999999818,
+    "p95_ms": 19.600000000000364,
+    "max_ms": 20.699999999999818,
+    "baseline_period_ms": 18.699999999999818,
+    "gap_threshold_ms": 28.049999999999727,
+    "gaps_at_least_1_5_periods": 0,
+    "estimated_missed_ticks": 0,
+    "scroll_top_px": 13200,
+    "screen": {
+      "width": 1360,
+      "height": 900,
+      "dpr": 1
+    }
+  },
+  "trace_rendering": {
+    "AnimationFrame": {
+      "events": 273,
+      "p95_ms": 19.714,
+      "total_ms": 4749.716
+    },
+    "AnimationFrame::Render": {
+      "events": 274,
+      "p95_ms": 2.712,
+      "total_ms": 450.271
+    },
+    "Layerize": {
+      "events": 274,
+      "p95_ms": 0.647,
+      "total_ms": 101.486
+    },
+    "Layout": {
+      "events": 802,
+      "p95_ms": 0.238,
+      "total_ms": 95.022
+    },
+    "Paint": {
+      "events": 4895,
+      "p95_ms": 0.346,
+      "total_ms": 193.784
+    },
+    "PrePaint": {
+      "events": 817,
+      "p95_ms": 0.258,
+      "total_ms": 48.562
+    },
+    "UpdateLayoutTree": {
+      "events": 802,
+      "p95_ms": 0.092,
+      "total_ms": 31.119
+    }
+  },
+  "trace_presentation": {
+    "events": 274,
+    "cadence": {
+      "intervals": 273,
+      "p50_ms": 18.677,
+      "p95_ms": 19.557,
+      "max_ms": 35.709,
+      "baseline_period_ms": 18.699999999999818,
+      "gap_threshold_ms": 28.049999999999727,
+      "gaps_at_least_1_5_periods": 1,
+      "estimated_missed_ticks": 1
+    }
+  },
+  "trace_active_window": {
+    "renderer_pid": 32812,
+    "start_us": 605770339800,
+    "end_us": 605775486745
+  },
+  "trace_first_row_before": "VO-302 M4 Load issue 0297",
+  "trace_first_row_after": "VO-603 M4 Load issue 0598",
+  "trace_scroll_speed_px_s": 2640,
+  "trace_scroll_distance_px": 13200,
+  "browser": "157.0.8103.50",
+  "channel": "chrome",
+  "headless": false,
+  "viewport": {
+    "width": 1360,
+    "height": 900
+  },
+  "seeded_issues": 5005,
+  "benchmark_issues": 5006,
+  "cold_to_usable_ms": 685.8999999761581,
+  "web_frame_metric": "Blink AnimationFrame::Render main-thread rendering slice (NSH --fps frame proxy)",
+  "web_presentation_metric": "Intervals between distinct Chrome presentation feedback timestamps for Blink animation frames",
+  "web_raf_metric": "requestAnimationFrame callback intervals compared to a same-browser native overflow scroller",
+  "budgets": {
+    "web_cold_start_2000_ms": true,
+    "web_render_frame_p95_16_ms": true
+  }
+}

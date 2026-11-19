@@ -10,6 +10,17 @@ Windows 上用已安装的 `@zed-industries/claude-agent-acp@0.18.0` 与 `@zed-i
 
 两组探针均以 `1` 退出，因为隔离数据目录下的适配器未满足带认证 prompt 的完整验收。探针未输出原始错误内容或凭据。现有 `CLAUDE_CODE` 与 `CODEX` profile 键和旧会话标识保持不变。通过模拟 ACP Agent 连接真实 MCP 进程的独立验收见 [m6-acp.md](m6-acp.md)。
 
+## 现有登录复验
+
+在临时 Git 目录中复用已登录的 Claude CLI 和 Codex 身份，通过直连运行相同的 ACP 探针。Claude 显式指定 `CLAUDE_CODE_EXECUTABLE`，Codex 使用适配器自带的 CLI。两端均完成 `initialize`、`session/new`、`session/prompt`，以及重启适配器后的 `session/load` 和第二次 `session/prompt`。四次请求均返回 `end_turn`。
+
+| 适配器 | MCP `initialize` | MCP `tools/list` | MCP `tools/call` |
+| --- | ---: | ---: | ---: |
+| Claude 与本机 CLI | 2 | 2 | 0 |
+| Codex | 2 | 2 | 2 |
+
+探针退出码为 0。Claude 包内 CLI 在 `session/new` 仍返回 `-32603`，关闭 MCP 的对照也相同。已验证的 Claude 配置依赖本机 CLI。
+
 ## 复跑
 
 在本工作树中使用 Python 3、Node、Git 与上述已安装适配器。`vibe-kanban-mcp` 构建命令见 [m6-acp.md](m6-acp.md#ACP-Agent-发现本地-MCP-工具)。下列命令从此文档提取并运行已执行的探针。每次执行均分配独立临时目录。

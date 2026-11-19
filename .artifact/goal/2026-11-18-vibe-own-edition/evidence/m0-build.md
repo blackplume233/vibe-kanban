@@ -51,3 +51,21 @@ npm_config_script_shell="$(cygpath -w "$(type -P bash)")" pnpm run check
 ## loop-006 集成工作区
 
 - 在 `90d4f723bcd956b3bbb35b7dc1841f522bea4c4f` 的独立工作树，加载 `harness/env.sh` 后执行锁定 nightly 的 `cargo test --locked --workspace`。退出 `0`，64 个测试目标合计 340 项通过、4 项忽略。原始日志位于 `F:/vk-targets/main/e1-integrated-workspace-tests.log`。E1 在正式包与默认入口切换后复跑。
+
+## loop-008 默认构建候选
+
+在隔离工作树 `verify-product-cutover` 将 Web 托管和默认构建切换合入共享产品入口。使用锁定 nightly、pnpm 10.13.1 和离线 Cargo 缓存验证。
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm run check` | 通过。将独立工作树中 CRLF 的 `nsh.json` 按生成器重新生成后，主题字节校验通过。 |
+| `cargo test --locked --workspace` | 361 项通过，5 项忽略。 |
+| `pnpm run generate-types:check` | TypeScript 与 10 个 JSON schema 一致。 |
+| `pnpm run lint` | Claude 评审方法与调用点共用 `qa-mode` 条件后通过。 |
+| `cargo build --locked -p server --bin server` | 通过。修复空工作区的 Git 状态后，standalone 同源托管通过 Chromium 实测。 |
+
+日志位于 `F:/vk-targets/main/cutover-*-v2.log`、`cutover-lint-v3.log` 和 `cutover-git-status-build.log`。这些结果来自候选工作树 `fe416bba2` 及上述两处修复，最终分支切换仍需对等验收。
+
+## 集成候选复验
+
+`my/m7-integrated-cutover` 在同一工作树合入终端依赖、Web 托管、默认发布命令和关机修复。用锁定 nightly 和离线依赖运行 `cargo check --locked --workspace`、`pnpm run check`、`pnpm run lint`、`pnpm run generate-types:check` 与 `cargo test --locked --workspace`，均退出 0。工作区测试通过 361 项，忽略 5 项。Cargo 元数据中的 NSH 默认图不含 `crates/remote`、`billing`、Tauri 或独立 relay 服务。原始日志在 `F:/vk-targets/main/integrated-cutover-*.log`。最终提交仍需在合入远程 ACP 后验收。

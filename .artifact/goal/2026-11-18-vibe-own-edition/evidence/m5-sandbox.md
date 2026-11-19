@@ -27,3 +27,13 @@ GitHub GraphQL 查询观察到 PR 状态 `OPEN` 与 `StatusContext(m5/controlled
 ## 自动评审讨论
 
 为 sandbox 仓库和评审者显式开启 `VK_GITHUB_REVIEW_DISPATCH_ALLOWLIST`，提交行内评审 `5979177086`。在原 Claude 会话 `402ca15e-48bc-4feb-9758-3d19791b5f2f` 中，轮询自动创建并持久调度讨论进程 `1cc9fbb7-152a-4371-b46e-063214f845aa`。该进程最终返回 `failed`，本次验证退出码为 `1`。已观察到自动调度，Claude 续接完成仍待验证。
+
+## Agent 修复、推送与 CI 转绿
+
+产品从 PR #2 读到一项失败检查。`POST /api/workspaces/aadcec66-e325-402a-ad2a-3f99fdc662ff/pull-requests/fix-ci` 调度真实 Codex ACP，执行 `cbb27876-5498-4712-a285-1d5361deeb68` 完成。工作树新提交只将 `ci-state.txt` 的 `fail` 改为 `ok`。在同一会话明确请求推送后，由执行 `1462fcb6-607d-43fa-a6e3-76cf68fdc41f` 推送沙箱分支 `m5-ci-fixture`。
+
+GitHub PR HEAD 为 `68bcbe297bac8ae7ed9e39bb0a7f573ed3f5f4bd`，唯一父提交是失败夹具，唯一改动文件是 `ci-state.txt`。通过 GitHub API 按 SHA 读取文件字节，`grep -Fxq ok ci-state.txt` 退出 0，GitHub `m5/controlled-ci` 状态变为 `success`。产品 PR 明细读回 `total=1`、`passed=1`、`failed=0`。
+
+## 真实 Claude 自动续接
+
+在同一沙箱启用 `VK_GITHUB_REVIEW_DISPATCH_ALLOWLIST`。隔离服务进程从现有 Claude 配置继承认证和模型环境，文本讨论继续禁用工具、Hooks 和 MCP。行内评审 `5981011247` 触发一次自动执行 `68af458e-71af-47bc-b269-1b173a913e8a`，在原会话 `88d80706-6cd3-4042-a4ef-5ec28f326eb8` 完成。日志核对 `tools=[]`、`mcp_servers=[]`，并读到对回归检查的回复。探针退出 0。

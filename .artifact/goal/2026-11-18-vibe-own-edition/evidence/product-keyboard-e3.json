@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "browser": "157.0.8103.50",
+  "issue": "a5f92c3b-8b73-4698-8d9f-5067dfff5316",
+  "workspace": "889aa85c-73d0-410f-bfaf-3460b33e8eb3",
+  "execution": "dbf2532c-f241-4112-82f4-9a66c1cd219a",
+  "passed": [
+    "find-project",
+    "create-issue",
+    "find-issue",
+    "move-status",
+    "launch-workspace",
+    "find-workspace",
+    "logs-and-diff",
+    "open-pr-form"
+  ],
+  "sockets": [
+    "/api/approvals/stream/ws",
+    "/api/execution-processes/dbf2532c-f241-4112-82f4-9a66c1cd219a/normalized-logs/ws",
+    "/api/execution-processes/dbf2532c-f241-4112-82f4-9a66c1cd219a/raw-logs/ws",
+    "/api/execution-processes/stream/session/ws?session_id=c535ad57-5fda-40b0-a11d-1d6bdc8a0839",
+    "/api/workspaces/889aa85c-73d0-410f-bfaf-3460b33e8eb3/git/diff/ws"
+  ],
+  "raw_log_frames": {
+    "/api/execution-processes/dbf2532c-f241-4112-82f4-9a66c1cd219a/raw-logs/ws": 177
+  },
+  "blocked_requests": [],
+  "page_errors": [],
+  "keystrokes": 217,
+  "video_sha256": "7c745860af2b1eaa252842e29df19d8142e662c986972f3f8afa960ecc129eef"
+}

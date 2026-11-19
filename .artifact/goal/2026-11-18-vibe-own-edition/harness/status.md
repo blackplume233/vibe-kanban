@@ -1,6 +1,6 @@
 # 控制面板
 
-更新时间：2026-11-19（协调者模式启动）
+更新时间：2026-11-20
 
 ## Plan
 
@@ -12,25 +12,24 @@
 
 | 里程碑 | 状态 | 下一步 |
 |---|---|---|
-| M0 基线 | in-progress | 锁定 nightly 的公开 check、严格 Clippy 和生成一致性通过。完整 check 仍涉及私有依赖。 |
+| M0 基线 | in-progress | NSH 默认构建候选已通过 check、lint、生成校验和 361 项工作区测试。集成分支的默认入口切换等待功能对等验收。 |
 | M1 NSH Spike | verified | 锁定 nightly 构建的 Win32 与 Chrome 通过真实服务 HTTP、日志追加与 diff。Win32 `frame` p95 为 5.77 ms。 |
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
-| M4 Linear 交互 | in-progress | 已合入动作、搜索、议题 API 与看板状态。双端操作界面开发中。 |
-| M5 GitHub 联动 | in-progress | `efe17674f` 的 73 项测试和类型生成检查通过。NSH 面板已合入待接线。测试仓库上的 Agent 推送、CI 转绿和 review 自动派发待验收。 |
-| M6 ACP 管理 | in-progress | SDK 升级和 Claude/Codex ACP 选项已合入。Claude 已验证跨进程续接和 MCP 发现。Claude prompt 与 Codex 新建会话遇到认证错误。 |
-| M7 对等与退役 | in-progress | 终端已合入 `559999fdc`。两端在真实 ConPTY 上验证交互和自然退出。Win32 验证脚本清理超时，待复验。主题包和生命周期等待集成。 |
+| M4 Linear 交互 | in-progress | Chromium 同源托管通过交互与性能验收。Win32 正式包九次含后端冷启动均低于 1 秒，已验证键盘创建、状态变更与关联工作区。 |
+| M5 GitHub 联动 | verified | 私有沙箱通过 Issue 往返、Codex 修复与推送、产品读回绿色检查，以及 Claude 文本模式自动续接。 |
+| M6 ACP 管理 | in-progress | OpenCode 实际 ACP 用量已入库。Claude（使用本机 CLI）和 Codex 已完成真实 ACP 新建与跨进程续接，远程执行节点待验证。 |
+| M7 对等与退役 | in-progress | Win32 和 Web 正式包通过工作区选择、在线日志、实际 diff 及窗口关闭清理。默认构建候选留在隔离工作树。 |
 
 ## Run
 
-- 当前 loop 为 `loop-007`。M1–M3 已验收。M5 与 M6 后端已通过集成测试，NSH 组件按独立切片合入。
+- `loop-008` 记录双端正式包、独立构建候选、实际 ACP 用量和空工作区修复。见 [循环记录](../loops/loop-008.md)。
 
 ## Gate
 
-- M0 已通过本地 Web 构建、公开 Rust 检查、前端类型、lint 和翻译键检查。锁定 nightly 的集成工作区在 `90d4f723b` 通过 340 项测试。完整命令在默认构建切换后复验。
-- Windows LF 检出规则已合入，实测 `generate_types --check` 退出 0。
-- 锁定 NSH 版本的打包 CLI 在 nightly 下编译通过，输出 `nsh 0.4.0`。正式应用包仍在 E1 验收范围。
-- M1 已通过锁定 nightly 的路线闸门，见 `../evidence/m1-gate.md`。Chrome rAF 间隔 p95 为 19.60 ms，E3 的产品列表帧耗时与启动测量待验收。
+- [默认构建候选](../evidence/m0-build.md#loop-008-默认构建候选)通过工作区测试和 pnpm 检查。最终集成分支仍需执行切换后验收。
+- [共享产品包](../subagents/m7-package-report.md#共享产品入口复验)通过 Win32 和 Chrome 实机验收。
+- 5,005 条议题时 Win32 首滚 650–810 ms，包含内嵌后端启动。Standalone Chromium 首次打开议题 723.8 ms，渲染切片 p95 1.676 ms。
 - M6 协议升级在 `4cb6f061c` 通过 185 项测试，5 项忽略。单独复验 `session/new` 和 `session/load` 均从真实 MCP 进程发现 `list_repos`。M5 集成复验的 73 项测试及生成检查通过，原始日志为 `F:/vk-targets/main/m5-acp-integration.log`。
 - E2 的离线部分验证本地议题、Agent 和 diff。真实开 PR 在 E5 的授权测试仓库联网完成，两段均保留证据。
 - E5 在私有测试仓库 `blackplume233/vibe-own-sandbox` 验收，先用本机 `gh` 凭据和测试进程内的 PAT。若仓库权限不足，记录具体 API 和响应。
@@ -42,6 +41,6 @@
 
 ## 待人工决策
 
-- M0 完整 `pnpm run check` 需要读取 `BloopAI/vibe-kanban-private` 的锁定提交 `020091913ce5608d6c8bdb667d124fd22ab10561`。推荐由用户确认具备该仓库只读权限的 SSH 身份，或在不删除 `crates/remote` 的前提下决定该私有依赖的处理方案。
+- 历史 `pnpm run check` 依赖私有 `billing` 仓库。新的默认构建候选已绕开云构建依赖，切换以功能对等证据为准。
 - E5 测试凭据可写提交状态，写入 Actions 工作流返回 404。可用外部 CI 实际运行同一 PR 提交上的测试并上报，若需 GitHub Actions 托管执行则补充 sandbox 的 workflow 写权限。
-- Claude ACP 的 `session/prompt` 和 Codex ACP 的 `session/new` 在隔离验收中返回认证错误 `-32000`。使用已登录且允许验收的测试身份后复跑两个适配器。详见 `../evidence/m6-real-adapters.md`。
+- Claude 适配器的包内 CLI 在 `session/new` 返回 `-32603`，使用本机 `claude.exe` 的配置已复验通过。详见 [实测结果](../evidence/m6-real-adapters.md#现有登录复验)。
