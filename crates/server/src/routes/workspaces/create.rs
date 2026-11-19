@@ -5,7 +5,7 @@ use db::models::{
     requests::{
         CreateAndStartWorkspaceRequest, CreateAndStartWorkspaceResponse, CreateWorkspaceApiRequest,
     },
-    workspace::{CreateWorkspace, Workspace},
+    workspace::{CreateWorkspace, Workspace, WorkspaceWithIssue},
 };
 use deployment::Deployment;
 use services::services::container::ContainerService;
@@ -23,6 +23,7 @@ use crate::{
 pub(crate) async fn create_workspace_record(
     deployment: &DeploymentImpl,
     name: Option<String>,
+    local_issue_id: Option<Uuid>,
 ) -> Result<Workspace, ApiError> {
     let workspace_id = Uuid::new_v4();
     let branch_label = name
@@ -34,16 +35,15 @@ pub(crate) async fn create_workspace_record(
         .git_branch_from_workspace(&workspace_id, branch_label)
         .await;
 
-    let workspace = Workspace::create(
-        &deployment.db().pool,
-        &CreateWorkspace {
-            branch: git_branch_name,
-            name: name.filter(|workspace_name| !workspace_name.is_empty()),
-        },
-        workspace_id,
-    )
-    .await?;
-
+    let data = CreateWorkspace {
+        branch: git_branch_name,
+        name: name.filter(|workspace_name| !workspace_name.is_empty()),
+    };
+    let pool = &deployment.db().pool;
+    let workspace = match local_issue_id {
+        Some(issue_id) => Workspace::create_for_issue(pool, &data, workspace_id, issue_id).await?,
+        None => Workspace::create(pool, &data, workspace_id).await?,
+    };
     Ok(workspace)
 }
 
@@ -51,7 +51,7 @@ pub async fn create_workspace(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateWorkspaceApiRequest>,
 ) -> Result<ResponseJson<ApiResponse<Workspace>>, ApiError> {
-    let workspace = create_workspace_record(&deployment, payload.name).await?;
+    let workspace = create_workspace_record(&deployment, payload.name, None).await?;
 
     deployment
         .track_if_analytics_allowed(
@@ -217,6 +217,7 @@ pub async fn create_and_start_workspace(
         name,
         repos,
         linked_issue,
+        local_issue_id,
         executor_config,
         prompt,
         attachment_ids,
@@ -236,7 +237,7 @@ pub async fn create_and_start_workspace(
 
     let mut managed_workspace = deployment
         .workspace_manager()
-        .load_managed_workspace(create_workspace_record(&deployment, name).await?)
+        .load_managed_workspace(create_workspace_record(&deployment, name, local_issue_id).await?)
         .await?;
 
     for repo in &repos {
@@ -313,7 +314,7 @@ pub async fn create_and_start_workspace(
 
     Ok(ResponseJson(ApiResponse::success(
         CreateAndStartWorkspaceResponse {
-            workspace,
+            workspace: WorkspaceWithIssue::find(&deployment.db().pool, workspace.id).await?,
             execution_process,
         },
     )))

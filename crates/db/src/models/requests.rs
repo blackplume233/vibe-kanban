@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use super::{execution_process::ExecutionProcess, workspace::Workspace};
+use super::{execution_process::ExecutionProcess, workspace::WorkspaceWithIssue};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ContainerQuery {
@@ -33,6 +33,9 @@ pub struct CreateAndStartWorkspaceRequest {
     pub name: Option<String>,
     pub repos: Vec<WorkspaceRepoInput>,
     pub linked_issue: Option<LinkedIssueInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub local_issue_id: Option<Uuid>,
     pub executor_config: ExecutorConfig,
     pub prompt: String,
     pub attachment_ids: Option<Vec<Uuid>>,
@@ -40,7 +43,7 @@ pub struct CreateAndStartWorkspaceRequest {
 
 #[derive(Debug, Serialize, Deserialize, TS)]
 pub struct CreateAndStartWorkspaceResponse {
-    pub workspace: Workspace,
+    pub workspace: WorkspaceWithIssue,
     pub execution_process: ExecutionProcess,
 }
 

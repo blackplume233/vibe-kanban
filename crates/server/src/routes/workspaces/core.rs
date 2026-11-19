@@ -28,16 +28,20 @@ pub struct DeleteWorkspaceQuery {
 
 pub async fn get_workspaces(
     State(deployment): State<DeploymentImpl>,
-) -> Result<ResponseJson<ApiResponse<Vec<Workspace>>>, ApiError> {
+) -> Result<ResponseJson<ApiResponse<Vec<db::models::workspace::WorkspaceWithIssue>>>, ApiError> {
     let pool = &deployment.db().pool;
-    let workspaces = Workspace::fetch_all(pool).await?;
+    let workspaces = db::models::workspace::WorkspaceWithIssue::fetch_all(pool).await?;
     Ok(ResponseJson(ApiResponse::success(workspaces)))
 }
 
 pub async fn get_workspace(
     Extension(workspace): Extension<Workspace>,
-) -> Result<ResponseJson<ApiResponse<Workspace>>, ApiError> {
-    Ok(ResponseJson(ApiResponse::success(workspace)))
+    State(deployment): State<DeploymentImpl>,
+) -> Result<ResponseJson<ApiResponse<db::models::workspace::WorkspaceWithIssue>>, ApiError> {
+    Ok(ResponseJson(ApiResponse::success(
+        db::models::workspace::WorkspaceWithIssue::find(&deployment.db().pool, workspace.id)
+            .await?,
+    )))
 }
 
 pub async fn update_workspace(

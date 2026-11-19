@@ -35,12 +35,13 @@ struct Session {
 }
 
 #[derive(Deserialize)]
-#[serde(bound(deserialize = "T: Deserialize<'de>"))]
-struct Envelope<T> {
+#[serde(bound(deserialize = "T: Deserialize<'de>, E: Deserialize<'de>"))]
+struct Envelope<T, E> {
     success: bool,
     #[serde(default, deserialize_with = "present_data")]
     data: Option<T>,
     message: Option<String>,
+    error_data: Option<E>,
 }
 
 fn present_data<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
@@ -49,26 +50,47 @@ fn present_data<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     T::deserialize(deserializer).map(Some)
 }
 
-fn decode_response<T: DeserializeOwned>(path: &str, status: u16, body: &[u8]) -> Result<T, String> {
-    if !(200..300).contains(&status) {
-        return Err(response_message(body).unwrap_or_else(|| format!("{path}: HTTP {status}")));
-    }
-    let envelope = serde_json::from_slice::<Envelope<T>>(body)
-        .map_err(|error| response_message(body).unwrap_or_else(|| format!("{path}: {error}")))?;
-    if !envelope.success {
-        return Err(envelope
-            .message
-            .unwrap_or_else(|| format!("{path}: request failed")));
-    }
-    envelope
-        .data
-        .ok_or_else(|| format!("{path}: response has no data"))
+#[derive(Debug)]
+pub(crate) struct ApiFailure<E> {
+    pub(crate) message: String,
+    pub(crate) data: Option<E>,
 }
 
-fn response_message(body: &[u8]) -> Option<String> {
-    serde_json::from_slice::<Envelope<IgnoredAny>>(body)
-        .ok()?
-        .message
+fn decode_response<T: DeserializeOwned, E: DeserializeOwned>(
+    path: &str,
+    status: u16,
+    body: &[u8],
+) -> Result<T, ApiFailure<E>> {
+    let ok = (200..300).contains(&status);
+    match serde_json::from_slice::<Envelope<T, E>>(body) {
+        Ok(envelope) if ok && envelope.success => envelope.data.ok_or_else(|| ApiFailure {
+            message: format!("{path}: response has no data"),
+            data: None,
+        }),
+        Ok(envelope) => Err(ApiFailure {
+            message: envelope.message.unwrap_or_else(|| {
+                if ok {
+                    format!("{path}: request failed")
+                } else {
+                    format!("{path}: HTTP {status}")
+                }
+            }),
+            data: envelope.error_data,
+        }),
+        Err(error) => Err(ApiFailure {
+            message: serde_json::from_slice::<Envelope<IgnoredAny, IgnoredAny>>(body)
+                .ok()
+                .and_then(|envelope| envelope.message)
+                .unwrap_or_else(|| {
+                    if ok {
+                        format!("{path}: {error}")
+                    } else {
+                        format!("{path}: HTTP {status}")
+                    }
+                }),
+            data: None,
+        }),
+    }
 }
 
 #[derive(Deserialize)]
@@ -142,13 +164,27 @@ impl Api {
         path: &str,
         body: Option<Vec<u8>>,
     ) -> Result<T, String> {
+        self.request_with_error::<T, IgnoredAny>(method, path, body)
+            .await
+            .map_err(|error| error.message)
+    }
+
+    pub(crate) async fn request_with_error<T: DeserializeOwned, E: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<T, ApiFailure<E>> {
         let mut request = HttpRequest::new(method, format!("{}{}", self.http, path));
         if let Some(body) = body {
             request = request
                 .header("Content-Type", "application/json")
                 .body(body);
         }
-        let response = fetch(request).await?;
+        let response = fetch(request).await.map_err(|message| ApiFailure {
+            message,
+            data: None,
+        })?;
         let data = decode_response(path, response.status(), &response.body)?;
         log::info!("HTTP {} {path}", response.status());
         Ok(data)
@@ -336,20 +372,24 @@ mod tests {
     #[test]
     fn deletes_accept_explicit_null_and_preserve_error_messages() {
         let path = "/api/projects/p/issues/i";
-        assert_eq!(
-            decode_response::<()>(path, 200, br#"{"success":true,"data":null}"#),
-            Ok(())
-        );
-        assert!(decode_response::<()>(path, 200, br#"{"success":true}"#).is_err());
-        let error = br#"{"success":false,"data":null,"message":"invalid status"}"#;
-        assert_eq!(
-            decode_response::<String>(path, 400, error),
-            Err("invalid status".into())
-        );
-        assert_eq!(
-            decode_response::<String>(path, 200, error),
-            Err("invalid status".into())
-        );
+        decode_response::<(), IgnoredAny>(path, 200, br#"{"success":true,"data":null}"#).unwrap();
+        assert!(decode_response::<(), IgnoredAny>(path, 200, br#"{"success":true}"#).is_err());
+        let body = br#"{"success":false,"data":null,"message":"invalid status"}"#;
+        for status in [400, 200] {
+            assert_eq!(
+                decode_response::<String, IgnoredAny>(path, status, body)
+                    .unwrap_err()
+                    .message,
+                "invalid status"
+            );
+        }
+        let failure = decode_response::<(), serde_json::Value>(
+            path,
+            200,
+            br#"{"success":false,"error_data":{"type":"rebase_in_progress"}}"#,
+        )
+        .unwrap_err();
+        assert_eq!(failure.data.unwrap()["type"], "rebase_in_progress");
     }
 
     #[test]
