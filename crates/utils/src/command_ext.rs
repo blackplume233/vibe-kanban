@@ -33,7 +33,6 @@ impl NoWindowExt for std::process::Command {
 impl NoWindowExt for tokio::process::Command {
     #[cfg(windows)]
     fn no_window(&mut self) -> &mut Self {
-        use std::os::windows::process::CommandExt;
         self.creation_flags(CREATE_NO_WINDOW)
     }
 

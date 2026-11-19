@@ -16,7 +16,30 @@ pub struct Project {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CreateLocalProject {
+    pub name: String,
+}
+
 impl Project {
+    pub async fn create(pool: &SqlitePool, name: &str) -> Result<Self, sqlx::Error> {
+        sqlx::query_as(
+            "INSERT INTO projects (id, name) VALUES (?, ?) RETURNING
+            id, name, default_agent_working_dir, remote_project_id, created_at, updated_at",
+        )
+        .bind(Uuid::new_v4())
+        .bind(name)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn exists(pool: &SqlitePool, id: Uuid) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM projects WHERE id = ?)")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+    }
+
     pub async fn find_all(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as!(
             Project,

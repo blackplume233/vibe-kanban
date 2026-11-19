@@ -33,6 +33,8 @@ pub mod tags;
 pub mod terminal;
 pub mod webrtc;
 pub mod workspaces;
+// vibe-own M2
+mod issues;
 
 pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
     let relay_signed_routes = Router::new()
@@ -59,6 +61,8 @@ pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
         .nest("/remote", remote::router())
         .merge(webrtc::router())
         .nest("/attachments", attachments::routes())
+        // vibe-own M2
+        .merge(issues::router())
         .layer(axum::middleware::from_fn_with_state(
             deployment.clone(),
             middleware::sign_relay_response,
