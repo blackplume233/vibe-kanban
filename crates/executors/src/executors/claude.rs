@@ -147,6 +147,7 @@ pub struct ClaudeCode {
 }
 
 impl ClaudeCode {
+    #[cfg(not(feature = "qa-mode"))]
     pub(crate) async fn spawn_discussion_follow_up(
         &self,
         current_dir: &Path,

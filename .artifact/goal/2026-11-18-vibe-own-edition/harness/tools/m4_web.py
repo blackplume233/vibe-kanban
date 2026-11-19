@@ -146,7 +146,12 @@ def smoke(page, url, fixture, read_api, shot):
 
     choose(page, "plrs", fixture["project"]["name"])
     expect(row(page, first)).to_be_visible()
-    choose(page, "dckyrd", fixture["workspace"]["name"])
+    git_status = f"/api/workspaces/{fixture['workspace']['id']}/git/status"
+    with page.expect_response(lambda response: urlsplit(response.url).path == git_status) as event:
+        choose(page, "dckyrd", fixture["workspace"]["name"])
+    response = event.value
+    payload = response.json()
+    assert response.ok and payload["success"] and payload["data"] == [], (response.status, payload)
     expect(page.get_by_text(fixture["workspace"]["name"], exact=True).last).to_be_visible()
     shot("03-workspace-query", "用模糊查询打开项目和工作区")
     button(page, "议题").click()
