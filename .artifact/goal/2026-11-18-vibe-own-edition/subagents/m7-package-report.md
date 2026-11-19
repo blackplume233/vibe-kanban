@@ -39,6 +39,15 @@ node design/generate-tokens.mjs --check
 cargo +nightly-2026-08-01 build --locked --release --lib --features m1-web-smoke --target wasm32-unknown-unknown
 ```
 
+## 实机验收
+
+- `nsh package --target windows` 和 `nsh package --target web` 在锁定 nightly 下生成正式产物。M1 的 `--features m1-web-smoke` 直编通过，`wasm-bindgen-cli 0.2.129` 处理后的 WASM 导出 `nsh_app_init`。
+- 隔离 Win32 与 Chrome 复验退出 `0`，日志见 `F:/vk-targets/m7-package/base-isolated-runtime.log`。脚本验证数据库在 `vibe-own-m7-rko2n3fo/data/db.v2.sqlite`，数据库内仅有刚创建的工作区，`git worktree list` 返回同一临时根下的工作树。Win32 的 HTTP、diff 和执行日志操作从包内服务读取，该服务的两个监听仅位于回环地址并属于窗口 PID。Chrome 157 通过相同 origin 请求 WASM、HTTP 及三个 WebSocket。关闭 Win32 后进程正常退出，回环连接失败，活跃任务心跳停止。截图存于 `F:/vk-targets/m7-package/base-isolated-runtime/`。
+- M3 正式宿主注册 Source Sans 3、IBM Plex Mono 和许可证。主题生成器同时投影 `nsh.json` 中的 `appearance`、`theme` 和 `tailwind`，`--check` 检测产物偏离。Win32 与 Web 运行 `PackagedApp` 并挂载同一个 `App`，保留 M4 的共享 API 请求层。
+- 主题产物的四个字体和许可证文件在 Windows、Web 各自的产物中均与源文件 SHA-256 一致。主题双端实机命令退出 `0`。日志及截图位于 `F:/vk-targets/m7-package/themed-runtime.log` 与 `F:/vk-targets/m7-package/themed-runtime/`。长期保留这一目录内的测试数据库与截图可复核隔离结果。
+- 完整复验覆盖 `e82085774a482f77f86794f6bf6607611fbe8696`，该提交同步 `0f0f8eb6c5` 的 ACP 与 GitHub 后端并更新应用锁文件。`windows-integrated.log`、`web-integrated.log`、`integrated-runtime-smoke.log` 与 `integrated-runtime/` 位于 `F:/vk-targets/m7-package`。两个正式打包命令及实机脚本均退出 `0`。测试数据库和 worktree 位于 `integrated-runtime/vibe-own-m7-97uadx6i/`，工作区 UUID 为 `d62d81bb-bf72-4f49-bbb1-4d098ebd9c3a`。Chrome 在 `127.0.0.1:65485` 读取同源 API，Win32 PID `92664` 退出并关闭 `127.0.0.1:50433`，同时停止实时任务 `16c3d7b5-affc-48e2-906a-3f7073f56490`。Vite 在浏览器关闭时记录 WebSocket `ECONNABORTED`，此前的 HTTP、WebSocket 和 diff 断言均通过。
+- 最终 Windows 产物 `integrated-windows/vibe-own.zip`，SHA-256 `cb14034b4cd56a67516bb28ad34ad548ded1fec9c543c41d6eeccd88cf6d93aa`。最终 Web 产物 `integrated-web/vibe-own/`，其中 `index.html` 的 SHA-256 为 `b557e985d2204bdea583d119208f279edaa117e580ff8a5da960828d5dc294ee`，`nsh.2e56a98d1b.wasm` 的 SHA-256 为 `2e56a98d1b327ec9f605fcc4b01f8320c76d7263487708f535aeff7c0585c01f`。
+
 ## E7 默认命令切换清单
 
 - Cargo 根 workspace 已排除 `crates/remote` 和 `crates/relay-tunnel`，它仍包含 `crates/tauri-app`。`pnpm run check` 经 `backend:check` 显式检查 `crates/remote/Cargo.toml`，`pnpm run lint` 经 `backend:lint` 显式执行 remote clippy。`remote:generate-types:check` 同样直接加载该清单。独立 remote 工作区解析时可能拉取其可选私有 Git 依赖 `billing`。将这些显式 remote 命令移出公共默认验证入口，`backend:format` 也单独执行 remote 格式化。
