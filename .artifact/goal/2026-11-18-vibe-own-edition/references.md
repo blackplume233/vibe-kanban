@@ -62,6 +62,7 @@
 
 - [Ponytail](https://github.com/DietrichGebert/ponytail)（2026-11-18）：最小探针优先复用已有宿主和组件。下一轮先通过真实的现有 API 验证两端连通，再扩展 UI。
 - [SkillOpt](https://github.com/microsoft/SkillOpt)（2026-11-18）：按实测轨迹更新证据门。下一轮保留可复跑入口，并断言浏览器与原生窗口显示来自同一服务的工作区记录。
+- Windows `cargo test --workspace` 的首个错误是页文件不足（`os error 1455`），随后出现读取 `.rlib` 失败和编译器内部错误。保留锁定 nightly，改用独立 target 目录、`--jobs 2`、`CARGO_INCREMENTAL=0` 和 `CARGO_PROFILE_TEST_DEBUG=0` 再验证。
 
 ## 子代理发现
 

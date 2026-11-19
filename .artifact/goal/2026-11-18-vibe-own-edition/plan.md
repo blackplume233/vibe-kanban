@@ -30,7 +30,7 @@
 | M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | 组件接入依赖 M1 | verified（锁定 nightly 通过 Win32 与 Chromium 展示页复验。见 `evidence/m3-showcase.md`。） |
 | M4 Linear 级交互与议题能力 | NSH 中的看板/列表、拖拽、Cmd+K 模糊搜索、动作注册表、行内编辑、peek、triage、cycle、保存视图 | E2、E3 录屏与性能日志 | M2、M3 | in-progress（动作、搜索、议题 API 和看板状态已合入，开发双端操作界面。） |
 | M5 GitHub 联动 | CI 状态 + 一键修复、review 评论自动 follow-up、GraphQL 批量轮询、Issue 双向同步、PAT 认证 | E5 测试仓库演示记录 | Issue 双向同步依赖 M2 | verified（私有沙箱实测 CI 修复、Agent 推送、绿色检查读回、文本模式自动评审续接和 Issue 双向往返。见 `evidence/m5-sandbox.md`。） |
-| M6 ACP Agent 管理 | 用量/成本、全局调度器 + 持久队列、MCP 注入、Claude/Codex 统一 ACP、可选远程节点 | E6 测试与 API 输出 | M0 | in-progress（本地预算与队列通过验收。Claude 与 Codex 通过真实新建与跨进程续接探针，远程节点待验证。） |
+| M6 ACP Agent 管理 | 用量/成本、全局调度器 + 持久队列、MCP 注入、Claude/Codex 统一 ACP、可选远程节点 | E6 测试与 API 输出 | M0 | verified（真实模型用量、队列恢复、MCP 和适配器续接通过。受信 SSH 节点经 Windows 协议测试及 Ubuntu 回环验证。见 `evidence/m6-acp.md`。） |
 | M7 对等与退役 | NSH 功能覆盖 React 版；终端面板可用；React 前端与 `crates/remote` 从默认构建移除；原生与 Web 发布包 | E1、E7；发布包路径与 hash | M4、M5、M6 | in-progress（正在验证正式 CLI 打包与原生内嵌服务。界面对等及退役等待依赖验收。） |
 
 M5、M6 与 M3/M4 可并行（后端与 UI 互不阻塞）。

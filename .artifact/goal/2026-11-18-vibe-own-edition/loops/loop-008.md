@@ -19,9 +19,11 @@
 - 正式 Web 包以键盘完成议题、工作区、日志、工作树变更和 PR 表单，保留录像。Win32 包在沙箱提交并跟踪草稿 PR。Chromium 前台滚动渲染 p95 2.712 ms，呈现间隔 p95 19.557 ms，基线 rAF p95 19.6 ms。见 [产品交互证据](../evidence/product-interaction.md)。
 - 私有沙箱通过 CI 修复、真实 Codex 推送、绿色状态读回和 Claude 自动文本续接。Claude/Codex 的通用 ACP 新建与会话续接均已有实际适配器证据。
 - 合入关闭修正和终端资源依赖后的隔离候选通过默认 `check`、`lint`、生成类型校验和 361 项工作区测试。两个目标的候选打包在同一工作树执行。
+- Win32 产品包通过跨列拖放，离线 API 读回目标状态。受信 ACP 节点通过 Windows 路径与取消用例、Ubuntu 真实 OpenSSH 握手和断连清理。
+- `6731b8402` 在本地 `my/main` 切换默认 NSH 构建并移除 sunset 页面，历史导出路由通过三个 TypeScript 检查。新 Web 包通过键盘复验。
 
 ## 终止检查
 
 - decision: continue
-- reason: Web 键盘、Windows 草稿 PR、GitHub 修复与评审、真实 ACP 适配器和隔离默认构建均取得证据。
-- remaining_evidence: Win32 手势串联验收、可选远程节点接线、最终包与 React 退役。
+- reason: 双端交互、GitHub、ACP 和默认构建已实测。仍需关闭最终产物与工作区测试闸门。
+- remaining_evidence: 低并发工作区测试、最终 Win32 包和键盘联网提交。

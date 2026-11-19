@@ -408,7 +408,7 @@ def browser_run(args, m4, origin, api, repo, fixture):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[4])
+    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[5])
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--site", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True, help="New directory for isolated test artifacts")

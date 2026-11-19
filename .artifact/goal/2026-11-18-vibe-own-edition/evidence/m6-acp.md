@@ -1,9 +1,5 @@
 # M6 ACP 验收记录
 
-## 集成复验
-
-独立检出 `4cb6f061ccdcf40afadf92a9fb8969a4d0cd1abf`，加载 `harness/env.sh`，设置 `SQLX_OFFLINE=true`。锁定 nightly 上执行 `cargo test --locked --offline -p db -p executors -p services -p local-deployment -p server`，185 项通过，5 项忽略。另行构建 `vibe-kanban-mcp` 并运行上述 MCP 测试，两个请求均发现 `list_repos`。原始日志位于 `F:/vk-targets/main/m6-acp-upgrade-4cb6f061c.log`。已安装适配器的单独认证结果见 [实际联调](m6-real-adapters.md)。
-
 ## 本地 HTTP 验证
 
 Windows 上构建 `server.exe`，启动两次独立的回环 HTTP 服务，共用同一个工作树中的 SQLite 数据库。Copilot 测试预设通过 `base_command_override` 启动本地 Node.js ACP 模拟进程，使用真实的 ACP v2 harness、归一化日志、用量写入和 API。Git 仓库夹具只有一个空提交。最终运行退出码为 `0`。
@@ -61,3 +57,19 @@ VK_TEST_MCP_BIN=F:/vk-targets/m6/debug/vibe-kanban-mcp.exe \
 "session/load" -> MCP tools/list contains list_repos
 test result: ok. 1 passed; 0 failed
 ```
+
+## 集成复验
+
+独立检出 `4cb6f061ccdcf40afadf92a9fb8969a4d0cd1abf`，加载 `harness/env.sh`，设置 `SQLX_OFFLINE=true`。锁定 nightly 上执行 `cargo test --locked --offline -p db -p executors -p services -p local-deployment -p server`，185 项通过，5 项忽略。另行构建 `vibe-kanban-mcp` 并运行上述 MCP 测试，两个请求均发现 `list_repos`。原始日志位于 `F:/vk-targets/main/m6-acp-upgrade-4cb6f061c.log`。已安装适配器的单独认证结果见 [实际联调](m6-real-adapters.md)。
+
+## 真实本地模型
+
+OpenCode 1.19.3 通过 `opencode acp --pure` 使用回环 Ollama 的 `gemma4:latest`。独立 ACP 请求返回 `end_turn`，用量为 2,282 输入、144 输出 token。
+
+产品验收通过隔离的 `COPILOT/OPENCODE_PROBE` 预设覆盖启动命令。`POST /api/workspaces/start` 从真实 Git 仓库创建工作区，执行状态为 `completed`。`GET /api/execution-usage?session_id=9ad16c62-ffa1-46a2-8c9d-96e5b2c993cd` 返回 2,046 输入、38 输出 token、`cost_usd=0.0` 和 `unpriced_samples=0`。探针在正成本断言上返回 1。正费率及适配器成本累计量由上面的受控测试覆盖。当前 ACP Registry 的 OpenCode 条目使用二进制分发，本次采用本机已安装的可执行文件。
+
+## 受信远程节点
+
+仅设置 `trusted_node` 的 ACP 预设连接配置节点。Windows `cargo test --locked -p executors trusted_node -- --include-ignored` 通过两个用例，验证会话绑定、路径转换和带用量的取消回执。`cargo clippy --locked -p executors --all-targets -- -D warnings` 退出 0。
+
+Ubuntu 上的真实 Python 子系统使用两个独立进程，确认共享工作目录和 Git 元数据、拒绝未验证的目录，并在通道关闭后回收 Agent PID。独立命名空间内启动真实 OpenSSH 服务，使用临时身份和主机密钥。错误主机密钥被拒绝。正确密钥连接到 `vibe-acp` 子系统，ACP v1 握手成功，断连后的 Agent PID 已消失。SSH 探针使用受控协议对端。实际模型与跨进程会话恢复由 [已安装适配器联调](m6-real-adapters.md) 验证。

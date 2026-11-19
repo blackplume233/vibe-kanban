@@ -69,3 +69,7 @@ npm_config_script_shell="$(cygpath -w "$(type -P bash)")" pnpm run check
 ## 集成候选复验
 
 `my/m7-integrated-cutover` 在同一工作树合入终端依赖、Web 托管、默认发布命令和关机修复。用锁定 nightly 和离线依赖运行 `cargo check --locked --workspace`、`pnpm run check`、`pnpm run lint`、`pnpm run generate-types:check` 与 `cargo test --locked --workspace`，均退出 0。工作区测试通过 361 项，忽略 5 项。Cargo 元数据中的 NSH 默认图不含 `crates/remote`、`billing`、Tauri 或独立 relay 服务。原始日志在 `F:/vk-targets/main/integrated-cutover-*.log`。最终提交仍需在合入远程 ACP 后验收。
+
+集成至 `my/main` 的提交为 `6731b8402`。带受信 ACP 节点的集成候选已经通过格式化、Cargo 工作区检查、默认 `check`、`lint` 及类型生成校验。首次运行工作区测试时，Windows 因页文件不足返回 `os error 1455`，低并发复验见 `F:/vk-targets/main/final-e1-clean-tests-j2.log`。
+
+`pnpm run build:web` 生成 `F:/vk-targets/main/integrated-cutover-web/vibe-own/`，以同一候选的 standalone 服务托管。Chrome 键盘流程八步全通过。`index.html` SHA-256 为 `42c2bc673134d5aef751395f41dc1c74f9c6f98f21fb10cb16987078a8f0d298`，WASM SHA-256 为 `7f305be07be9eccd586a931a321e3123908777a746f313fa3b8624be083c60be`。根目录压缩副本全部解包并按字节匹配。

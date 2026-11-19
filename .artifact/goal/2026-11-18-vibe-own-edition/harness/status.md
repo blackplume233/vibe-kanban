@@ -12,14 +12,14 @@
 
 | 里程碑 | 状态 | 下一步 |
 |---|---|---|
-| M0 基线 | in-progress | NSH 默认构建候选已通过 check、lint、生成校验和 361 项工作区测试。集成分支的默认入口切换等待功能对等验收。 |
+| M0 基线 | in-progress | `my/main` 已采用 NSH 默认构建。检查、Clippy 和类型生成通过，工作区测试正以低并发复验。 |
 | M1 NSH Spike | verified | 锁定 nightly 构建的 Win32 与 Chrome 通过真实服务 HTTP、日志追加与 diff。Win32 `frame` p95 为 5.77 ms。 |
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
-| M4 Linear 交互 | in-progress | Chromium 同源托管通过交互与性能验收。Win32 正式包九次含后端冷启动均低于 1 秒，已验证键盘创建、状态变更与关联工作区。 |
+| M4 Linear 交互 | in-progress | Win32 拖放已落库，Chromium 键盘流程覆盖 Agent、真实 diff 和 PR 表单。联网键盘提交遇到 Git TLS 错误。 |
 | M5 GitHub 联动 | verified | 私有沙箱通过 Issue 往返、Codex 修复与推送、产品读回绿色检查，以及 Claude 文本模式自动续接。 |
-| M6 ACP 管理 | in-progress | OpenCode 实际 ACP 用量已入库。Claude（使用本机 CLI）和 Codex 已完成真实 ACP 新建与跨进程续接，远程执行节点待验证。 |
-| M7 对等与退役 | in-progress | Win32 和 Web 正式包通过工作区选择、在线日志、实际 diff 及窗口关闭清理。默认构建候选留在隔离工作树。 |
+| M6 ACP 管理 | verified | 实际 ACP 用量、持久队列、MCP、Claude/Codex 会话续接有证据。受信节点通过 Windows 协议测试与 Ubuntu 回环 SSH 验收。 |
+| M7 对等与退役 | in-progress | NSH 默认入口和 sunset 页面移除已合入 `my/main`。历史导出路由的类型检查通过，正在复验发布包。 |
 
 ## Run
 
@@ -27,11 +27,11 @@
 
 ## Gate
 
-- [默认构建候选](../evidence/m0-build.md#loop-008-默认构建候选)通过工作区测试和 pnpm 检查。最终集成分支仍需执行切换后验收。
+- [默认构建候选](../evidence/m0-build.md#集成候选复验) 已合入。新 Web 包已通过键盘探针。最终工作区测试及配套 Win32 包待复验。
 - [共享产品包](../subagents/m7-package-report.md#共享产品入口复验)通过 Win32 和 Chrome 实机验收。
-- 5,005 条议题时 Win32 首滚 650–810 ms，包含内嵌后端启动。Standalone Chromium 首次打开议题 723.8 ms，渲染切片 p95 1.676 ms。
+- Win32 5,005 条议题首次滚动 721.6 ms，最高主线程帧耗时 p95 6.84 ms。Chromium 前台首次键盘操作 685.9 ms，渲染 p95 2.712 ms。见 [产品交互证据](../evidence/product-interaction.md)。
 - M6 协议升级在 `4cb6f061c` 通过 185 项测试，5 项忽略。单独复验 `session/new` 和 `session/load` 均从真实 MCP 进程发现 `list_repos`。M5 集成复验的 73 项测试及生成检查通过，原始日志为 `F:/vk-targets/main/m5-acp-integration.log`。
-- E2 的离线部分验证本地议题、Agent 和 diff。真实开 PR 在 E5 的授权测试仓库联网完成，两段均保留证据。
+- E2 的离线部分验证了本地议题、拖放、Agent、日志和 diff。Win32 包在授权沙箱创建草稿 PR #3 并记录 URL。
 - E5 在私有测试仓库 `blackplume233/vibe-own-sandbox` 验收，先用本机 `gh` 凭据和测试进程内的 PAT。若仓库权限不足，记录具体 API 和响应。
 
 ## Handoff
