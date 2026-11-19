@@ -1,6 +1,9 @@
 //! GitHub hosting service implementation.
 
 mod cli;
+mod graphql;
+mod http;
+mod rest;
 
 use std::{path::Path, time::Duration};
 
@@ -8,6 +11,8 @@ use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
 pub use cli::GhCli;
 use cli::{GhCliError, GitHubRepoInfo};
+pub use graphql::{GitHubPrSnapshot, PR_BATCH_SIZE};
+use http::GitHubApi;
 use tokio::task;
 use tracing::info;
 
@@ -29,6 +34,58 @@ impl GitHubProvider {
         Ok(Self {
             gh_cli: GhCli::new(),
         })
+    }
+
+    /// Whether this PR can be included in the github.com GraphQL query.
+    pub fn supports_batch(pr_url: &str) -> bool {
+        rest::public_pr(pr_url).is_some()
+    }
+
+    /// Fetch statuses, CI and (optionally) inline review comments in input order.
+    pub async fn poll_batch(
+        &self,
+        urls: &[&str],
+        include_reviews: bool,
+    ) -> Result<Vec<Result<GitHubPrSnapshot, GitHostError>>, GitHostError> {
+        let requests = urls
+            .iter()
+            .map(|url| rest::public_pr(url).ok_or(GitHostError::UnsupportedProvider))
+            .collect::<Result<Vec<_>, _>>()?;
+        let api = GitHubApi::from_env()?;
+        graphql::batch(api.as_ref(), &requests, include_reviews).await
+    }
+
+    pub async fn get_inline_review_comments(
+        &self,
+        pr_url: &str,
+    ) -> Result<Vec<UnifiedPrComment>, GitHostError> {
+        let (repo, number) = if let Some(pr) = rest::public_pr(pr_url) {
+            pr
+        } else {
+            let (host, parts) =
+                rest::github_path(pr_url).ok_or(GitHostError::UnsupportedProvider)?;
+            let [owner, repo, kind, number] = parts.as_slice() else {
+                return Err(GitHostError::UnsupportedProvider);
+            };
+            if kind != "pull" {
+                return Err(GitHostError::UnsupportedProvider);
+            }
+            let number = number
+                .parse()
+                .map_err(|_| GitHostError::UnsupportedProvider)?;
+            return rest::review_comments(
+                None,
+                &GitHubRepoInfo {
+                    owner: owner.clone(),
+                    repo_name: repo.clone(),
+                    hostname: Some(host),
+                },
+                number,
+            )
+            .await;
+        };
+        let api = GitHubApi::from_env()?;
+        rest::review_comments(api.as_ref(), &repo, number).await
     }
 
     async fn get_repo_info(
@@ -161,6 +218,12 @@ impl GitHostProvider for GitHubProvider {
         remote_url: &str,
         request: &CreatePrRequest,
     ) -> Result<PullRequestDetail, GitHostError> {
+        if let Some(repo) = rest::public_repo(remote_url)
+            && let Some(api) = GitHubApi::from_env()?
+        {
+            return rest::create_pr(&api, &repo, request).await;
+        }
+
         // Get owner/repo from the remote URL (target repo for the PR).
         let target_repo_info = self.get_repo_info(remote_url, repo_path).await?;
 
@@ -221,6 +284,14 @@ impl GitHostProvider for GitHubProvider {
     }
 
     async fn get_pr_status(&self, pr_url: &str) -> Result<PullRequestDetail, GitHostError> {
+        if Self::supports_batch(pr_url) {
+            let mut results = self.poll_batch(&[pr_url], false).await?;
+            return results
+                .pop()
+                .expect("one query result")
+                .map(|snapshot| snapshot.detail);
+        }
+
         let cli = self.gh_cli.clone();
         let url = pr_url.to_string();
 
@@ -260,6 +331,12 @@ impl GitHostProvider for GitHubProvider {
         remote_url: &str,
         branch_name: &str,
     ) -> Result<Vec<PullRequestDetail>, GitHostError> {
+        if let Some(repo) = rest::public_repo(remote_url)
+            && let Some(api) = GitHubApi::from_env()?
+        {
+            return graphql::list_prs_for_branch(&api, &repo, branch_name).await;
+        }
+
         let repo_info = self.get_repo_info(remote_url, repo_path).await?;
 
         let cli = self.gh_cli.clone();
@@ -303,6 +380,18 @@ impl GitHostProvider for GitHubProvider {
         remote_url: &str,
         pr_number: i64,
     ) -> Result<Vec<UnifiedPrComment>, GitHostError> {
+        if let Some(repo) = rest::public_repo(remote_url)
+            && let Some(api) = GitHubApi::from_env()?
+        {
+            let (mut general, review) = tokio::try_join!(
+                rest::comments(&api, &repo, pr_number, false),
+                rest::comments(&api, &repo, pr_number, true),
+            )?;
+            general.extend(review);
+            general.sort_by_key(UnifiedPrComment::created_at);
+            return Ok(general);
+        }
+
         let repo_info = self.get_repo_info(remote_url, repo_path).await?;
 
         // Fetch both types of comments in parallel
@@ -357,6 +446,12 @@ impl GitHostProvider for GitHubProvider {
         repo_path: &Path,
         remote_url: &str,
     ) -> Result<Vec<PullRequestDetail>, GitHostError> {
+        if let Some(repo) = rest::public_repo(remote_url)
+            && let Some(api) = GitHubApi::from_env()?
+        {
+            return rest::list_recent_prs(&api, &repo).await;
+        }
+
         let repo_info = self.get_repo_info(remote_url, repo_path).await?;
 
         let cli = self.gh_cli.clone();

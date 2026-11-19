@@ -270,6 +270,11 @@ fn generate_types_content() -> String {
         relay_webrtc::WsError::decl(),
         relay_webrtc::SdpOffer::decl(),
         relay_webrtc::SdpAnswer::decl(),
+        // vibe-own M5
+        git_host::FailedPrCheck::decl(),
+        git_host::PrCheckSummary::decl(),
+        server::routes::workspaces::pr::PrDetailQuery::decl(),
+        server::routes::workspaces::pr::FixCiResponse::decl(),
     ];
 
     let body = decls

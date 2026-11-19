@@ -12,11 +12,18 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use db::models::merge::MergeStatus;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 use url::Url;
 use utils::{command_ext::NoWindowExt, shell::resolve_executable_path_blocking};
+
+use super::{
+    graphql::CheckContext,
+    http::{defer_requests, rate_limited, retry_after},
+};
+use crate::{GitHostError, PrCheckSummary};
 
 use crate::types::{
     CreatePrRequest, PrComment, PrCommentAuthor, PrReviewComment, PullRequestDetail,
@@ -117,6 +124,7 @@ struct GhPrResponse {
     head_ref_name: Option<String>,
     #[serde(default)]
     updated_at: Option<DateTime<Utc>>,
+    status_check_rollup: Option<Vec<CheckContext>>,
 }
 
 #[derive(Debug, Error)]
@@ -150,9 +158,23 @@ impl GhCli {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_internal(args, dir, false)
+    }
+
+    fn run_internal<I, S>(
+        &self,
+        args: I,
+        dir: Option<&Path>,
+        allow_partial: bool,
+    ) -> Result<String, GhCliError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         self.ensure_available()?;
         let gh = resolve_executable_path_blocking("gh").ok_or(GhCliError::NotAvailable)?;
         let mut cmd = Command::new(&gh);
+        cmd.env_remove("GH_DEBUG").env("GH_PROMPT_DISABLED", "1");
         if let Some(d) = dir {
             cmd.current_dir(d);
         }
@@ -164,7 +186,7 @@ impl GhCli {
             .output()
             .map_err(|err| GhCliError::CommandFailed(err.to_string()))?;
 
-        if output.status.success() {
+        if output.status.success() || (allow_partial && output.stdout.starts_with(b"HTTP/")) {
             return Ok(String::from_utf8_lossy(&output.stdout).to_string());
         }
 
@@ -268,7 +290,7 @@ impl GhCli {
                 "view",
                 pr_url,
                 "--json",
-                "number,url,state,mergedAt,mergeCommit,title,baseRefName,headRefName",
+                "number,url,state,mergedAt,mergeCommit,title,baseRefName,headRefName,statusCheckRollup",
             ],
             None,
         )?;
@@ -400,6 +422,55 @@ impl GhCli {
         Self::parse_pr_review_comments(&raw)
     }
 
+    pub(super) fn graphql(&self, json: &[u8]) -> Result<String, GitHostError> {
+        let mut payload = NamedTempFile::new()
+            .map_err(|_| GitHostError::PullRequest("Could not open GitHub CLI input".into()))?;
+        payload
+            .write_all(json)
+            .map_err(|_| GitHostError::PullRequest("Could not write GitHub CLI input".into()))?;
+        let response = self
+            .run_internal(
+                [
+                    OsStr::new("api"),
+                    OsStr::new("graphql"),
+                    OsStr::new("--hostname"),
+                    OsStr::new("github.com"),
+                    OsStr::new("--include"),
+                    OsStr::new("--input"),
+                    payload.path().as_os_str(),
+                ],
+                None,
+                true,
+            )
+            .map_err(sanitized_api_error)?;
+        parse_graphql_http_response(response)
+    }
+
+    pub(super) fn paged_review_comments(
+        &self,
+        repo: &GitHubRepoInfo,
+        number: i64,
+    ) -> Result<String, GitHostError> {
+        super::http::check_rate_limit()?;
+        let endpoint = format!(
+            "repos/{}/{}/pulls/{number}/comments?per_page=100",
+            repo.owner, repo.repo_name
+        );
+        let host = repo.hostname.as_deref().unwrap_or("github.com");
+        self.run(
+            [
+                "api",
+                &endpoint,
+                "--hostname",
+                host,
+                "--paginate",
+                "--slurp",
+            ],
+            None,
+        )
+        .map_err(sanitized_api_error)
+    }
+
     pub fn pr_checkout(
         &self,
         repo_path: &Path,
@@ -419,6 +490,66 @@ impl GhCli {
             Some(repo_path),
         )?;
         Ok(())
+    }
+}
+
+fn parse_graphql_http_response(response: String) -> Result<String, GitHostError> {
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .or_else(|| response.split_once("\n\n"))
+        .ok_or_else(|| GitHostError::UnexpectedOutput("GitHub CLI omitted HTTP headers".into()))?;
+    let mut lines = headers.lines();
+    let status = lines
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| GitHostError::UnexpectedOutput("GitHub CLI omitted HTTP status".into()))?;
+    let mut headers = HeaderMap::new();
+    for line in lines {
+        if let Some((key, value)) = line.split_once(':')
+            && let Ok(key) = HeaderName::from_bytes(key.as_bytes())
+            && let Ok(value) = HeaderValue::from_str(value.trim())
+        {
+            headers.insert(key, value);
+        }
+    }
+    let delay = retry_after(&headers, Utc::now().timestamp());
+    if let Some(delay) = delay {
+        defer_requests(delay);
+    }
+    match status {
+        200..=299 => Ok(body.to_owned()),
+        401 => Err(GitHostError::AuthFailed(
+            "GitHub CLI authentication required".into(),
+        )),
+        403 if delay.is_some() => Err(rate_limited(delay.unwrap_or_default())),
+        429 => Err(rate_limited(
+            delay.unwrap_or(std::time::Duration::from_secs(60)),
+        )),
+        403 => Err(GitHostError::InsufficientPermissions(
+            "GitHub rejected the request".into(),
+        )),
+        _ => Err(GitHostError::PullRequest(format!(
+            "GitHub CLI returned HTTP {status}"
+        ))),
+    }
+}
+
+fn sanitized_api_error(error: GhCliError) -> GitHostError {
+    match error {
+        GhCliError::NotAvailable => GitHostError::CliNotInstalled {
+            provider: crate::ProviderKind::GitHub,
+        },
+        GhCliError::AuthFailed(_) => {
+            GitHostError::AuthFailed("GitHub CLI authentication required".into())
+        }
+        GhCliError::CommandFailed(message)
+            if message.to_ascii_lowercase().contains("rate limit")
+                || message.contains("HTTP 429") =>
+        {
+            rate_limited(std::time::Duration::from_secs(60))
+        }
+        _ => GitHostError::PullRequest("GitHub CLI API request failed".into()),
     }
 }
 
@@ -466,6 +597,7 @@ impl GhCli {
             title: request.title.clone(),
             base_branch: request.base_branch.clone(),
             head_branch: request.head_branch.clone(),
+            checks: None,
         })
     }
 
@@ -507,6 +639,13 @@ impl GhCli {
             title: pr.title.unwrap_or_default(),
             base_branch: pr.base_ref_name.unwrap_or_default(),
             head_branch: pr.head_ref_name.unwrap_or_default(),
+            checks: pr.status_check_rollup.map(|checks| {
+                let mut summary = PrCheckSummary::default();
+                for check in checks {
+                    check.add_to_summary(&mut summary);
+                }
+                summary
+            }),
         }
     }
 

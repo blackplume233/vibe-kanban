@@ -24,12 +24,15 @@ use executors::actions::{
 };
 use git::{GitCliError, GitRemote, GitServiceError};
 use git_host::{
-    CreatePrRequest, GitHostError, GitHostProvider, GitHostService, ProviderKind, UnifiedPrComment,
-    github::GhCli,
+    CreatePrRequest, GitHostError, GitHostProvider, GitHostService, ProviderKind,
+    PullRequestDetail, UnifiedPrComment, github::GhCli,
 };
 use serde::{Deserialize, Serialize};
 use services::services::{
-    config::DEFAULT_PR_DESCRIPTION_PROMPT, container::ContainerService, remote_sync,
+    config::DEFAULT_PR_DESCRIPTION_PROMPT,
+    container::ContainerService,
+    pr_follow_up::{self, PrFollowUpDispatch, PrFollowUpError},
+    remote_sync,
 };
 use ts_rs::TS;
 use utils::response::ApiResponse;
@@ -91,6 +94,80 @@ pub enum GetPrCommentsError {
 #[derive(Debug, Deserialize, TS)]
 pub struct GetPrCommentsQuery {
     pub repo_id: Uuid,
+}
+
+#[derive(Debug, Deserialize, TS)]
+pub struct PrDetailQuery {
+    pub repo_id: Uuid,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum FixCiResponse {
+    Started { execution_process_id: Uuid },
+    Queued { session_id: Uuid },
+}
+
+async fn attached_pr_detail(
+    deployment: &DeploymentImpl,
+    workspace: &Workspace,
+    repo_id: Uuid,
+) -> Result<PullRequestDetail, ApiError> {
+    let prs =
+        PullRequest::find_by_workspace_and_repo_id(&deployment.db().pool, workspace.id, repo_id)
+            .await?;
+    let pr = prs.into_iter().next().ok_or_else(|| {
+        ApiError::BadRequest("No PR attached to this workspace repository".into())
+    })?;
+    let host = GitHostService::from_url(&pr.pr_url)?;
+    Ok(host.get_pr_status(&pr.pr_url).await?)
+}
+
+async fn get_pr_detail(
+    Extension(workspace): Extension<Workspace>,
+    State(deployment): State<DeploymentImpl>,
+    Query(query): Query<PrDetailQuery>,
+) -> Result<ResponseJson<ApiResponse<PullRequestDetail>>, ApiError> {
+    let detail = attached_pr_detail(&deployment, &workspace, query.repo_id).await?;
+    Ok(ResponseJson(ApiResponse::success(detail)))
+}
+
+async fn fix_ci(
+    Extension(workspace): Extension<Workspace>,
+    State(deployment): State<DeploymentImpl>,
+    Query(query): Query<PrDetailQuery>,
+) -> Result<ResponseJson<ApiResponse<FixCiResponse>>, ApiError> {
+    let detail = attached_pr_detail(&deployment, &workspace, query.repo_id).await?;
+    if !matches!(detail.status, MergeStatus::Open) {
+        return Err(ApiError::Conflict("The attached PR is not open".into()));
+    }
+    let checks = detail.checks.as_ref().ok_or_else(|| {
+        ApiError::BadRequest("CI checks are unavailable for the attached PR".into())
+    })?;
+    let prompt = pr_follow_up::fix_ci_prompt(&detail.url, checks)
+        .ok_or_else(|| ApiError::Conflict("The attached PR has no failing CI checks".into()))?;
+    let response = match pr_follow_up::dispatch(
+        deployment.container(),
+        deployment.queued_message_service(),
+        &workspace,
+        prompt,
+    )
+    .await
+    {
+        Ok(PrFollowUpDispatch::Started {
+            execution_process_id,
+        }) => FixCiResponse::Started {
+            execution_process_id,
+        },
+        Ok(PrFollowUpDispatch::Queued { session_id }) => FixCiResponse::Queued { session_id },
+        Err(e @ (PrFollowUpError::Busy | PrFollowUpError::NoAgent)) => {
+            return Err(ApiError::Conflict(e.to_string()));
+        }
+        Err(PrFollowUpError::Database(e)) => return Err(e.into()),
+        Err(PrFollowUpError::Container(e)) => return Err(e.into()),
+        Err(PrFollowUpError::Scratch(e)) => return Err(e.into()),
+    };
+    Ok(ResponseJson(ApiResponse::success(response)))
 }
 
 async fn trigger_pr_description_follow_up(
@@ -848,4 +925,6 @@ pub fn router() -> Router<DeploymentImpl> {
         .route("/", post(create_pr))
         .route("/attach", post(attach_existing_pr))
         .route("/comments", get(get_pr_comments))
+        .route("/detail", get(get_pr_detail))
+        .route("/fix-ci", post(fix_ci))
 }

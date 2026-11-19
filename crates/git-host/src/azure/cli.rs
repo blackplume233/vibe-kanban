@@ -486,6 +486,7 @@ impl AzCli {
                 .source_ref_name
                 .map(|r| r.strip_prefix("refs/heads/").unwrap_or(&r).to_string())
                 .unwrap_or_default(),
+            checks: None,
         }
     }
 

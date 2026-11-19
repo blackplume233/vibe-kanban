@@ -13,6 +13,7 @@ pub mod filesystem;
 pub mod filesystem_watcher;
 pub mod notification;
 pub mod oauth_credentials;
+pub mod pr_follow_up;
 pub mod pr_monitor;
 
 #[cfg(feature = "qa-mode")]

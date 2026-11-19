@@ -53,6 +53,21 @@ impl QueuedMessageService {
         queued
     }
 
+    /// Queue generated follow-ups without replacing a user-authored draft.
+    pub fn queue_if_empty(&self, session_id: Uuid, data: DraftFollowUpData) -> bool {
+        use dashmap::mapref::entry::Entry;
+
+        let Entry::Vacant(slot) = self.queue.entry(session_id) else {
+            return false;
+        };
+        slot.insert(QueuedMessage {
+            session_id,
+            data,
+            queued_at: Utc::now(),
+        });
+        true
+    }
+
     /// Cancel/remove a queued message for a session
     pub fn cancel_queued(&self, session_id: Uuid) -> Option<QueuedMessage> {
         self.queue.remove(&session_id).map(|(_, v)| v)
