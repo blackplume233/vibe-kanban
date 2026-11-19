@@ -53,6 +53,33 @@ pub struct Workspace {
     pub worktree_deleted: bool,
 }
 
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize, TS)]
+pub struct WorkspaceWithIssue {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub workspace: Workspace,
+    pub local_issue_id: Option<Uuid>,
+}
+
+impl WorkspaceWithIssue {
+    pub async fn fetch_all(pool: &SqlitePool) -> Result<Vec<Self>, WorkspaceError> {
+        Ok(
+            sqlx::query_as::<_, Self>("SELECT * FROM workspaces ORDER BY created_at DESC")
+                .fetch_all(pool)
+                .await?,
+        )
+    }
+
+    pub async fn find(pool: &SqlitePool, id: Uuid) -> Result<Self, WorkspaceError> {
+        sqlx::query_as::<_, Self>("SELECT * FROM workspaces WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+            .ok_or(WorkspaceError::WorkspaceNotFound)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct WorkspaceWithStatus {
     #[serde(flatten)]
@@ -313,6 +340,39 @@ impl Workspace {
         data: &CreateWorkspace,
         id: Uuid,
     ) -> Result<Self, WorkspaceError> {
+        Self::insert(pool, data, id).await
+    }
+
+    pub async fn create_for_issue(
+        pool: &SqlitePool,
+        data: &CreateWorkspace,
+        id: Uuid,
+        issue_id: Uuid,
+    ) -> Result<Workspace, WorkspaceError> {
+        let mut tx = pool.begin().await?;
+        let workspace = Self::insert(&mut *tx, data, id).await?;
+        let linked = sqlx::query(
+            "UPDATE workspaces SET local_issue_id = ? WHERE id = ? AND EXISTS (SELECT 1 FROM issues WHERE id = ?)",
+        )
+        .bind(issue_id)
+        .bind(id)
+        .bind(issue_id)
+        .execute(&mut *tx)
+        .await?;
+        if linked.rows_affected() == 0 {
+            return Err(WorkspaceError::ValidationError(
+                "Local issue not found".into(),
+            ));
+        }
+        tx.commit().await?;
+        Ok(workspace)
+    }
+
+    async fn insert<'e>(
+        db: impl sqlx::SqliteExecutor<'e>,
+        data: &CreateWorkspace,
+        id: Uuid,
+    ) -> Result<Self, WorkspaceError> {
         Ok(sqlx::query_as!(
             Workspace,
             r#"INSERT INTO workspaces (id, task_id, container_ref, branch, setup_completed_at, name)
@@ -325,7 +385,7 @@ impl Workspace {
             Option::<DateTime<Utc>>::None,
             data.name
         )
-        .fetch_one(pool)
+        .fetch_one(db)
         .await?)
     }
 
@@ -674,7 +734,79 @@ impl Workspace {
 mod tests {
     use uuid::Uuid;
 
-    use super::Workspace;
+    use super::{CreateWorkspace, Workspace, WorkspaceError, WorkspaceWithIssue};
+    use crate::models::project::Project;
+
+    #[sqlx::test]
+    async fn local_issue_link_is_atomic_and_cleared_on_delete() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        let project = Project::create(&pool, "Local workspace test")
+            .await
+            .unwrap();
+        let status = Uuid::new_v4();
+        let issue = Uuid::new_v4();
+        sqlx::query("INSERT INTO project_statuses (id, project_id, name, color, category, sort_order) VALUES (?, ?, 'Todo', '#ffffff', 'unstarted', 0)")
+            .bind(status).bind(project.id).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO issues (id, project_id, status_id, title) VALUES (?, ?, ?, 'Use local worktree')")
+            .bind(issue).bind(project.id).bind(status).execute(&pool).await.unwrap();
+
+        let input = CreateWorkspace {
+            branch: "vk/lifecycle".into(),
+            name: None,
+        };
+        let unlinked = Uuid::new_v4();
+        Workspace::create(&pool, &input, unlinked).await.unwrap();
+        assert_eq!(
+            WorkspaceWithIssue::find(&pool, unlinked)
+                .await
+                .unwrap()
+                .local_issue_id,
+            None
+        );
+
+        let missing = Uuid::new_v4();
+        assert!(matches!(
+            Workspace::create_for_issue(&pool, &input, missing, Uuid::new_v4()).await,
+            Err(WorkspaceError::ValidationError(_)),
+        ));
+        assert!(
+            Workspace::find_by_id(&pool, missing)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let linked = Uuid::new_v4();
+        Workspace::create_for_issue(&pool, &input, linked, issue)
+            .await
+            .unwrap();
+        let rows = WorkspaceWithIssue::fetch_all(&pool).await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.workspace.id == linked)
+                .unwrap()
+                .local_issue_id,
+            Some(issue)
+        );
+
+        sqlx::query("DELETE FROM issues WHERE id = ?")
+            .bind(issue)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            WorkspaceWithIssue::find(&pool, linked)
+                .await
+                .unwrap()
+                .local_issue_id,
+            None
+        );
+    }
 
     #[test]
     fn best_matching_container_ref_prefers_deepest_match() {
