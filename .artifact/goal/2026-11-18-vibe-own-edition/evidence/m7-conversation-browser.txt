@@ -1,0 +1,85 @@
+API GET /workspaces 200
+API DELETE /workspaces/4117669a-018c-45c0-ac3f-cd92a3ebd5fc?delete_branches=true 202
+API DELETE /workspaces/f2ba6ce8-a2f7-4682-a917-20391f05e7c7?delete_branches=true 202
+API GET /repos 200
+API POST /workspaces 200
+API POST /workspaces 200
+API POST /workspaces/186eb391-e392-4fda-ab10-519b1e7d03ea/repos 200
+API POST /workspaces/966176fb-b72e-4b78-82b8-747b7e669074/repos 200
+API POST /sessions 200
+API POST /sessions 200
+Chrome 157.0.8103.50, viewport 1180 × 900
+127.0.0.1 - - [19/Nov/2026 23:45:08] "GET /?backend_port=63609 HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:08] "GET /nsh.js HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:08] "GET /nsh-bindgen.js HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:08] "GET /nsh-bindgen_bg.wasm HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:09] "GET /api/workspaces HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:09] "GET /api/sessions?workspace_id=186eb391-e392-4fda-ab10-519b1e7d03ea HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:09] "GET /api/info HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:09] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:09] "GET /api/execution-queue HTTP/1.1" 200 -
+Screenshot ready
+127.0.0.1 - - [19/Nov/2026 23:45:10] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:10] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:10] "POST /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/follow-up HTTP/1.1" 200 -
+Screenshot running
+127.0.0.1 - - [19/Nov/2026 23:45:11] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:11] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:12] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:12] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:13] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:13] "GET /api/execution-queue HTTP/1.1" 200 -
+Screenshot approval
+127.0.0.1 - - [19/Nov/2026 23:45:13] "POST /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+Screenshot queue
+API GET /sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue 200
+127.0.0.1 - - [19/Nov/2026 23:45:14] "DELETE /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+API GET /sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue 200
+127.0.0.1 - - [19/Nov/2026 23:45:14] "POST /api/sessions HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:14] "GET /api/sessions/a9076ed4-d56b-496b-9abe-4cc693026175/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:14] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:15] "POST /api/sessions/a9076ed4-d56b-496b-9abe-4cc693026175/follow-up HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:15] "GET /api/sessions/a9076ed4-d56b-496b-9abe-4cc693026175/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:15] "GET /api/execution-queue HTTP/1.1" 200 -
+API GET /execution-queue 200
+Screenshot scheduled
+127.0.0.1 - - [19/Nov/2026 23:45:15] "POST /api/execution-processes/c944101b-3626-4353-ba9a-6af0b5945b4c/stop HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:16] "GET /api/sessions/a9076ed4-d56b-496b-9abe-4cc693026175/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:16] "GET /api/execution-queue HTTP/1.1" 200 -
+API GET /execution-queue 200
+127.0.0.1 - - [19/Nov/2026 23:45:17] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:17] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:17] "POST /api/approvals/13d51405-ac2f-41a9-93dd-198cbdd6b094/respond HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:17] "POST /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/follow-up HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:18] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:18] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:19] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:19] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:20] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:20] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:20] "POST /api/approvals/fbb77743-ae9a-404c-86c1-31b603564076/respond HTTP/1.1" 200 -
+Screenshot denial
+127.0.0.1 - - [19/Nov/2026 23:45:21] "POST /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/follow-up HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:21] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:21] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:22] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:22] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:23] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:23] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:23] "POST /api/execution-processes/21f502f1-e765-401a-b1f1-bc4ec1e1e28f/stop HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "POST /api/sessions HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/sessions/25cdf10e-9f08-4b64-8138-06b676cfe565/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/execution-queue HTTP/1.1" 200 -
+Screenshot agent-selection
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/sessions?workspace_id=966176fb-b72e-4b78-82b8-747b7e669074 HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/info HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/execution-queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/sessions/eccfc202-7e67-4d83-8f8a-197d251f009c/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/sessions?workspace_id=186eb391-e392-4fda-ab10-519b1e7d03ea HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/info HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/sessions/0d8b048e-6321-4bec-ba07-d737b1fcc374/queue HTTP/1.1" 200 -
+127.0.0.1 - - [19/Nov/2026 23:45:24] "GET /api/execution-queue HTTP/1.1" 200 -
+Screenshot restored
+Closed sockets: ['ws://127.0.0.1:63609/api/execution-processes/619a27a6-5b93-4fdf-b57b-a76d3a502051/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/619a27a6-5b93-4fdf-b57b-a76d3a502051/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/619a27a6-5b93-4fdf-b57b-a76d3a502051/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/c944101b-3626-4353-ba9a-6af0b5945b4c/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/c944101b-3626-4353-ba9a-6af0b5945b4c/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/c944101b-3626-4353-ba9a-6af0b5945b4c/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/stream/session/ws?session_id=a9076ed4-d56b-496b-9abe-4cc693026175', 'ws://127.0.0.1:63609/api/execution-processes/stream/session/ws?session_id=0d8b048e-6321-4bec-ba07-d737b1fcc374', 'ws://127.0.0.1:63609/api/execution-processes/619a27a6-5b93-4fdf-b57b-a76d3a502051/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/90b8e150-a59a-4a04-92b5-1b0e00fdc220/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/90b8e150-a59a-4a04-92b5-1b0e00fdc220/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/90b8e150-a59a-4a04-92b5-1b0e00fdc220/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/21f502f1-e765-401a-b1f1-bc4ec1e1e28f/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/21f502f1-e765-401a-b1f1-bc4ec1e1e28f/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/90b8e150-a59a-4a04-92b5-1b0e00fdc220/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/21f502f1-e765-401a-b1f1-bc4ec1e1e28f/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/stream/session/ws?session_id=0d8b048e-6321-4bec-ba07-d737b1fcc374', 'ws://127.0.0.1:63609/api/execution-processes/stream/session/ws?session_id=25cdf10e-9f08-4b64-8138-06b676cfe565', 'ws://127.0.0.1:63609/api/execution-processes/stream/session/ws?session_id=0d8b048e-6321-4bec-ba07-d737b1fcc374', 'ws://127.0.0.1:63609/api/approvals/stream/ws', 'ws://127.0.0.1:63609/api/execution-processes/stream/session/ws?session_id=eccfc202-7e67-4d83-8f8a-197d251f009c', 'ws://127.0.0.1:63609/api/approvals/stream/ws', 'ws://127.0.0.1:63609/api/execution-processes/619a27a6-5b93-4fdf-b57b-a76d3a502051/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/90b8e150-a59a-4a04-92b5-1b0e00fdc220/normalized-logs/ws', 'ws://127.0.0.1:63609/api/execution-processes/21f502f1-e765-401a-b1f1-bc4ec1e1e28f/normalized-logs/ws']
