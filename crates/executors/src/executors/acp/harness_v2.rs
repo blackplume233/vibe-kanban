@@ -14,14 +14,15 @@ use acp::{
     schema::{
         ProtocolVersion,
         v1::{
-            CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest,
-            NewSessionRequest, PromptRequest, RequestPermissionRequest, SessionNotification,
-            SessionUpdate, TextContent,
+            CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, McpServer,
+            NewSessionRequest, PromptRequest, PromptResponse, RequestPermissionRequest,
+            SessionNotification, SessionUpdate, StopReason, TextContent,
         },
     },
 };
 use async_trait::async_trait;
 use command_group::AsyncGroupChild;
+use serde::Deserialize;
 use serde_json::Value;
 use tokio::{
     io::AsyncWriteExt,
@@ -42,7 +43,7 @@ use crate::{
     executors::{
         ExecutorError, ExecutorExitResult, SpawnedChild,
         acp::{
-            AcpEvent, SessionManager,
+            AcpEvent, AcpUsageUpdate, SessionManager,
             permissions::{ask_user, auto_approve},
             session_config::{
                 ConfigSink, ConfigValue, DesiredConfig, SessionOptions, apply_config,
@@ -50,6 +51,7 @@ use crate::{
             },
         },
     },
+    logs::ExecutionTokenUsage,
     profile::ExecutorConfig,
 };
 
@@ -59,6 +61,7 @@ pub struct AcpAgentHarnessV2 {
     config: DesiredConfig,
     legacy_namespace: Option<String>,
     discovery_key: Option<ExecutorConfigCacheKey>,
+    mcp_config_path: Option<PathBuf>,
 }
 
 /// Time limit for an agent to initialize / load a session / create a new session.
@@ -134,6 +137,11 @@ impl AcpAgentHarnessV2 {
         self
     }
 
+    pub(in crate::executors) fn with_mcp_config(mut self, path: Option<PathBuf>) -> Self {
+        self.mcp_config_path = path;
+        self
+    }
+
     pub fn config(&self) -> &DesiredConfig {
         &self.config
     }
@@ -162,6 +170,8 @@ impl AcpAgentHarnessV2 {
         cmd_overrides: &CmdOverrides,
         approvals: Option<std::sync::Arc<dyn ExecutorApprovalService>>,
     ) -> Result<SpawnedChild, ExecutorError> {
+        let mcp_servers =
+            super::mcp::read_servers(self.mcp_config_path.as_deref(), current_dir).await?;
         let env_vars = env.clone().with_profile(cmd_overrides).vars;
         let mut child = spawn_acp_process(current_dir, command_parts, &env_vars).await?;
 
@@ -176,6 +186,7 @@ impl AcpAgentHarnessV2 {
             Some(exit_tx),
             self.config.clone(),
             self.discovery_key.clone(),
+            mcp_servers,
             approvals,
             cancel.clone(),
         )
@@ -229,6 +240,8 @@ impl AcpAgentHarnessV2 {
             None => (Some(session_id.to_string()), prompt),
         };
 
+        let mcp_servers =
+            super::mcp::read_servers(self.mcp_config_path.as_deref(), current_dir).await?;
         let env_vars = env.clone().with_profile(cmd_overrides).vars;
         let mut child = spawn_acp_process(current_dir, command_parts, &env_vars).await?;
 
@@ -243,6 +256,7 @@ impl AcpAgentHarnessV2 {
             Some(exit_tx),
             self.config.clone(),
             self.discovery_key.clone(),
+            mcp_servers,
             approvals,
             cancel.clone(),
         )
@@ -264,23 +278,24 @@ impl AcpAgentHarnessV2 {
         exit_signal: Option<tokio::sync::oneshot::Sender<ExecutorExitResult>>,
         config: DesiredConfig,
         discovery_key: Option<ExecutorConfigCacheKey>,
+        mcp_servers: Vec<McpServer>,
         approvals: Option<Arc<dyn ExecutorApprovalService>>,
         cancel: CancellationToken,
     ) -> Result<(), ExecutorError> {
         let transport = take_transport(child)?;
 
         // Create a fresh stdout pipe for logs
-        let writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
-        let shared_writer = Arc::new(tokio::sync::Mutex::new(writer));
+        let mut writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
         let (log_tx, mut log_rx) = mpsc::unbounded_channel::<String>();
 
         // Spawn log -> stdout writer task
-        tokio::spawn(async move {
+        let log_writer = tokio::spawn(async move {
             while let Some(line) = log_rx.recv().await {
                 let mut data = line.into_bytes();
                 data.push(b'\n');
-                let mut w = shared_writer.lock().await;
-                let _ = w.write_all(&data).await;
+                if writer.write_all(&data).await.is_err() {
+                    break;
+                }
             }
         });
 
@@ -361,7 +376,16 @@ impl AcpAgentHarnessV2 {
                     acp::on_receive_request!(),
                 )
                 .connect_with(transport, async move |connection: ConnectionTo<Agent>| {
-                    run_session(connection, existing_session, cwd, prompt, config, shared).await
+                    run_session(
+                        connection,
+                        existing_session,
+                        cwd,
+                        prompt,
+                        config,
+                        shared,
+                        mcp_servers,
+                    )
+                    .await
                 })
                 .await;
 
@@ -373,6 +397,9 @@ impl AcpAgentHarnessV2 {
                     ExecutorExitResult::Failure
                 }
             };
+            // The container closes the execution log stream after the exit signal.
+            drop(log_tx);
+            let _ = log_writer.await;
             if let Some(tx) = exit_signal {
                 let _ = tx.send(exit);
             }
@@ -458,12 +485,21 @@ pub(crate) async fn open_session(
     existing: Option<String>,
     cwd: PathBuf,
 ) -> Result<(String, SessionOptions), acp::Error> {
+    open_session_with_mcp(connection, existing, cwd, Vec::new()).await
+}
+
+async fn open_session_with_mcp(
+    connection: &ConnectionTo<Agent>,
+    existing: Option<String>,
+    cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
+) -> Result<(String, SessionOptions), acp::Error> {
     match existing {
         Some(session_id) => {
             tracing::debug!("📝 Loading session {session_id}...");
             let request = UntypedMessage::new(
                 "session/load",
-                LoadSessionRequest::new(session_id.clone(), cwd),
+                LoadSessionRequest::new(session_id.clone(), cwd).mcp_servers(mcp_servers),
             )?;
             let response = with_timeout(
                 "load the session",
@@ -475,7 +511,10 @@ pub(crate) async fn open_session(
         }
         None => {
             tracing::debug!("📝 Creating new session...");
-            let request = UntypedMessage::new("session/new", NewSessionRequest::new(cwd))?;
+            let request = UntypedMessage::new(
+                "session/new",
+                NewSessionRequest::new(cwd).mcp_servers(mcp_servers),
+            )?;
             let response = with_timeout(
                 "create a new session",
                 connection.send_request(request).block_task(),
@@ -534,6 +573,30 @@ impl ConfigSink for ConnectionSink<'_> {
     }
 }
 
+fn prompt_response(response: &Value) -> Result<(StopReason, Option<AcpEvent>), acp::Error> {
+    let stop_reason = PromptResponse::deserialize(response)?.stop_reason;
+    let usage_event = response
+        .get("usage")
+        .and_then(prompt_usage)
+        .map(|usage| AcpEvent::Usage(AcpUsageUpdate::Prompt(usage)));
+    Ok((stop_reason, usage_event))
+}
+
+fn prompt_usage(usage: &Value) -> Option<ExecutionTokenUsage> {
+    let count = |name| usage.get(name).and_then(Value::as_u64);
+    // The installed schema calls this a prompt response but defines these fields
+    // across all turns of the session. Keep the snapshot, with no inferred model or cost.
+    count("totalTokens")?;
+    Some(ExecutionTokenUsage {
+        input_tokens: count("inputTokens")?,
+        output_tokens: count("outputTokens")?,
+        cache_read_tokens: count("cachedReadTokens").unwrap_or_default(),
+        cache_write_tokens: count("cachedWriteTokens").unwrap_or_default(),
+        cumulative: true,
+        ..Default::default()
+    })
+}
+
 async fn run_session(
     connection: ConnectionTo<Agent>,
     existing_session: Option<String>,
@@ -541,8 +604,19 @@ async fn run_session(
     prompt: String,
     config: DesiredConfig,
     shared: SessionShared,
+    mut mcp_servers: Vec<McpServer>,
 ) -> Result<(), acp::Error> {
     let init_response = initialize(&connection).await?;
+
+    let capabilities = &init_response.agent_capabilities.mcp_capabilities;
+    let configured = mcp_servers.len();
+    mcp_servers.retain(|server| match server {
+        McpServer::Stdio(_) => true,
+        McpServer::Http(_) => capabilities.http,
+        McpServer::Sse(_) => capabilities.sse,
+        _ => false,
+    });
+    let skipped = configured - mcp_servers.len();
 
     if existing_session.is_some() {
         if !init_response.agent_capabilities.load_session {
@@ -552,7 +626,7 @@ async fn run_session(
         }
         shared.replaying.store(true, Ordering::SeqCst);
     }
-    let opened = open_session(&connection, existing_session, cwd).await;
+    let opened = open_session_with_mcp(&connection, existing_session, cwd, mcp_servers).await;
     shared.replaying.store(false, Ordering::SeqCst);
     let (session_id, mut options) = opened?;
     if let Some(key) = &shared.discovery_key {
@@ -560,6 +634,11 @@ async fn run_session(
     }
 
     shared.send(AcpEvent::SessionStart(session_id.clone()));
+    if skipped > 0 {
+        shared.send(AcpEvent::SessionConfig(format!(
+            "Skipped {skipped} MCP server(s) because the agent does not support their transport."
+        )));
+    }
 
     apply_session_config(&connection, &session_id, &mut options, &config, &shared).await;
 
@@ -567,14 +646,16 @@ async fn run_session(
     // rejection; others may keep working first, so for them the feedback can arrive late.
     let mut next_prompt = Some(prompt);
     while let Some(text) = next_prompt.take() {
-        let mut turn = std::pin::pin!(
-            connection
-                .send_request(PromptRequest::new(
-                    session_id.clone(),
-                    vec![ContentBlock::Text(TextContent::new(text))]
-                ))
-                .block_task()
-        );
+        // Read the complete result because the typed schema gates `usage` behind
+        // an unstable feature. The stable stop reason still uses its schema type.
+        let request = UntypedMessage::new(
+            "session/prompt",
+            PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::Text(TextContent::new(text))],
+            ),
+        )?;
+        let mut turn = std::pin::pin!(connection.send_request(request).block_task());
 
         // Send the prompt and await completion to obtain stop_reason
         let response = tokio::select! {
@@ -590,8 +671,11 @@ async fn run_session(
         };
         match response {
             Ok(resp) => {
-                // Emit done with stop_reason
-                let stop_reason = serde_json::to_string(&resp.stop_reason).unwrap_or_default();
+                let (stop_reason, usage) = prompt_response(&resp)?;
+                if let Some(event) = usage {
+                    shared.send(event);
+                }
+                let stop_reason = serde_json::to_string(&stop_reason).unwrap_or_default();
 
                 tracing::debug!("✅ Agent completed!");
                 tracing::debug!("Stop reason: {:?}", stop_reason);
@@ -680,6 +764,193 @@ pub(crate) async fn with_timeout<T>(
 }
 
 #[cfg(test)]
+mod mcp_requests {
+    use acp::{Channel, TransportFrame};
+    use futures::StreamExt;
+    use serde_json::json;
+
+    use super::*;
+    use crate::executors::acp::mcp;
+
+    async fn receive(peer: &mut Channel) -> Value {
+        let TransportFrame::Single(message) = peer.rx.next().await.unwrap() else {
+            panic!("expected a single ACP request");
+        };
+        serde_json::to_value(message).unwrap()
+    }
+
+    fn reply(peer: &Channel, request: &Value, result: Value) {
+        let response = json!({"jsonrpc": "2.0", "id": request["id"], "result": result});
+        peer.tx
+            .unbounded_send(TransportFrame::Single(
+                serde_json::from_value(response).unwrap(),
+            ))
+            .unwrap();
+    }
+
+    async fn capture_session_request(
+        cwd: PathBuf,
+        existing: Option<&str>,
+        mcp_capabilities: Value,
+        mcp_servers: Vec<McpServer>,
+    ) -> (Value, Vec<AcpEvent>) {
+        tokio::time::timeout(Duration::from_secs(5), async move {
+            let (transport, mut peer) = Channel::duplex();
+            let (log_tx, mut log_rx) = mpsc::unbounded_channel();
+            let shared = SessionShared {
+                log_tx,
+                cancel: CancellationToken::new(),
+                replaying: Arc::default(),
+                denial_feedback: Arc::default(),
+                options: Arc::default(),
+                discovery_key: None,
+                tracking_config: Arc::default(),
+            };
+            let existing_session = existing.map(str::to_owned);
+            let client = tokio::spawn(acp::Client.builder().connect_with(
+                transport,
+                async move |cx| {
+                    run_session(
+                        cx,
+                        existing_session,
+                        cwd,
+                        "test".into(),
+                        DesiredConfig::default(),
+                        shared,
+                        mcp_servers,
+                    )
+                    .await
+                },
+            ));
+
+            let initialize = receive(&mut peer).await;
+            assert_eq!(initialize["method"], "initialize");
+            reply(
+                &peer,
+                &initialize,
+                json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {
+                        "loadSession": true,
+                        "mcpCapabilities": mcp_capabilities,
+                    },
+                }),
+            );
+
+            let session = receive(&mut peer).await;
+            let session_id = existing.unwrap_or("new-id");
+            let result = if existing.is_some() {
+                json!({})
+            } else {
+                json!({"sessionId": session_id})
+            };
+            reply(&peer, &session, result);
+            let prompt = receive(&mut peer).await;
+            assert_eq!(prompt["method"], "session/prompt");
+            assert_eq!(prompt["params"]["sessionId"], session_id);
+            reply(
+                &peer,
+                &prompt,
+                json!({
+                    "stopReason": "end_turn",
+                    "usage": { "totalTokens": 50, "inputTokens": 39, "outputTokens": 11 }
+                }),
+            );
+            client.await.unwrap().unwrap();
+
+            let mut events = Vec::new();
+            while let Ok(line) = log_rx.try_recv() {
+                events.push(serde_json::from_str(&line).unwrap());
+            }
+            assert!(events.iter().any(|event| matches!(
+                event,
+                AcpEvent::Usage(AcpUsageUpdate::Prompt(ExecutionTokenUsage {
+                    input_tokens: 39,
+                    output_tokens: 11,
+                    cumulative: true,
+                    ..
+                }))
+            )));
+            (session, events)
+        })
+        .await
+        .expect("ACP session request timed out")
+    }
+
+    #[tokio::test]
+    async fn new_and_loaded_sessions_send_configured_mcp_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path();
+        let command = cwd.join("test-runner");
+        let path = mcp::config_path(cwd, "test/registry-agent");
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        let config = json!({
+            "mcpServers": {
+                "cli": {"command": command, "args": ["--stdio"], "env": {"SETTING": "example"}},
+                "http": {"type": "http", "url": "https://example.test/mcp", "headers": {"X-Test": "example"}},
+                "sse": {"type": "sse", "url": "https://example.test/events"},
+            },
+        });
+        tokio::fs::write(&path, config.to_string()).await.unwrap();
+        let servers = mcp::read_servers(Some(&path), cwd).await.unwrap();
+        let stdio = json!({
+            "name": "cli", "command": command, "args": ["--stdio"],
+            "env": [{"name": "SETTING", "value": "example"}],
+        });
+        let http = json!({
+            "name": "http", "type": "http", "url": "https://example.test/mcp",
+            "headers": [{"name": "X-Test", "value": "example"}],
+        });
+        let sse = json!({
+            "name": "sse", "type": "sse", "url": "https://example.test/events", "headers": [],
+        });
+        let (new, _) = capture_session_request(
+            cwd.to_owned(),
+            None,
+            json!({"http": true, "sse": true}),
+            servers.clone(),
+        )
+        .await;
+        assert_eq!(new["method"], "session/new");
+        assert_eq!(new["params"]["cwd"], json!(cwd));
+        assert_eq!(new["params"]["mcpServers"], json!([stdio, http, sse]));
+
+        let (load, events) = capture_session_request(
+            cwd.to_owned(),
+            Some("existing-id"),
+            json!({"sse": true}),
+            servers,
+        )
+        .await;
+        assert_eq!(load["method"], "session/load");
+        assert_eq!(load["params"]["sessionId"], "existing-id");
+        assert_eq!(load["params"]["cwd"], json!(cwd));
+        assert_eq!(load["params"]["mcpServers"], json!([stdio, sse]));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AcpEvent::SessionConfig(message) if message.contains("Skipped 1 MCP")
+        )));
+    }
+
+    #[tokio::test]
+    async fn sessions_without_mcp_settings_send_an_empty_list() {
+        let cwd = tempfile::tempdir().unwrap();
+        let servers = mcp::read_servers(None, cwd.path()).await.unwrap();
+        let (request, events) =
+            capture_session_request(cwd.path().to_path_buf(), None, json!({}), servers).await;
+
+        assert_eq!(request["method"], "session/new");
+        assert_eq!(request["params"]["mcpServers"], json!([]));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            AcpEvent::SessionConfig(message) if message.contains("MCP")
+        )));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -712,5 +983,41 @@ mod tests {
     fn other_errors_stay_plain() {
         let event = exit_event(&acp::util::internal_error("boom"));
         assert!(matches!(event, AcpEvent::Error(_)));
+    }
+
+    #[test]
+    fn prompt_result_usage_survives_stdout_serialization() {
+        let response: Value = serde_json::from_str(
+            r#"{
+            "stopReason":"cancelled",
+            "usage":{
+                "totalTokens":4700000070,"inputTokens":4700000000,"outputTokens":40,
+                "cachedReadTokens":20,"cachedWriteTokens":10,"thoughtTokens":5
+            }
+        }"#,
+        )
+        .unwrap();
+        let (reason, event) = prompt_response(&response).unwrap();
+        assert_eq!(reason, StopReason::Cancelled);
+        let serialized = event.unwrap().to_string();
+        let AcpEvent::Usage(AcpUsageUpdate::Prompt(billing)) = serialized.parse().unwrap() else {
+            panic!("expected prompt billing in the serialized event");
+        };
+        assert_eq!(
+            billing,
+            ExecutionTokenUsage {
+                input_tokens: 4_700_000_000,
+                output_tokens: 40,
+                cache_read_tokens: 20,
+                cache_write_tokens: 10,
+                cumulative: true,
+                ..Default::default()
+            }
+        );
+
+        let response = serde_json::json!({"stopReason": "end_turn", "usage": {"inputTokens": 1}});
+        let (reason, event) = prompt_response(&response).unwrap();
+        assert_eq!(reason, StopReason::EndTurn);
+        assert!(event.is_none());
     }
 }

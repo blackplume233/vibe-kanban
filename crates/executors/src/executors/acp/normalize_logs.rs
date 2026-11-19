@@ -12,15 +12,18 @@ use serde::Deserialize;
 use workspace_utils::{approvals::ApprovalStatus, msg_store::MsgStore};
 
 pub use super::AcpAgentHarness;
-use super::AcpEvent;
+use super::{AcpEvent, AcpUsageUpdate};
 use crate::{
     approvals::ToolCallMetadata,
     logs::{
         ActionType, FileChange, NormalizedEntry, NormalizedEntryError, NormalizedEntryType,
-        TodoItem, ToolResult, ToolResultValueType, ToolStatus as LogToolStatus,
+        TodoItem, TokenUsageInfo, ToolResult, ToolResultValueType, ToolStatus as LogToolStatus,
         plain_text_processor::PlainTextLogProcessor,
         stderr_processor::normalize_stderr_logs,
-        utils::{ConversationPatch, EntryIndexProvider, shell_command_parsing::CommandCategory},
+        utils::{
+            ConversationPatch, EntryIndexProvider, patch::upsert_normalized_entry,
+            shell_command_parsing::CommandCategory,
+        },
     },
 };
 
@@ -78,6 +81,12 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
         let mut stored_session_id = false;
         let mut streaming: StreamingState = StreamingState::default();
         let mut tool_states: ToolStates = HashMap::new();
+        let mut usage_index = None;
+        let mut usage = TokenUsageInfo {
+            total_tokens: 0,
+            model_context_window: 0,
+            billing: None,
+        };
 
         let mut stdout_lines = msg_store.stdout_lines_stream();
         while let Some(Ok(line)) = stdout_lines.next().await {
@@ -105,6 +114,52 @@ pub fn normalize_logs_with_suppressed_stderr_patterns(
                     AcpEvent::Done(_) => {
                         streaming.assistant_text = None;
                         streaming.thinking_text = None;
+                    }
+                    AcpEvent::Usage(update) => {
+                        match update {
+                            AcpUsageUpdate::Context {
+                                used,
+                                size,
+                                cost_usd,
+                            } => {
+                                usage.total_tokens = u32::try_from(used).unwrap_or(u32::MAX);
+                                usage.model_context_window =
+                                    u32::try_from(size).unwrap_or(u32::MAX);
+                                if let Some(cost) = cost_usd {
+                                    let billing = usage.billing.get_or_insert_default();
+                                    billing.cost_usd = Some(cost);
+                                    billing.cumulative = true;
+                                }
+                            }
+                            AcpUsageUpdate::Prompt(mut billing) => {
+                                billing.cost_usd = usage
+                                    .billing
+                                    .as_ref()
+                                    .and_then(|previous| previous.cost_usd);
+                                usage.billing = Some(billing);
+                            }
+                        }
+                        let content = if usage.model_context_window == 0 {
+                            "Token usage".to_string()
+                        } else {
+                            format!(
+                                "Tokens used: {} / Context window: {}",
+                                usage.total_tokens, usage.model_context_window
+                            )
+                        };
+                        let is_new = usage_index.is_none();
+                        let index = *usage_index.get_or_insert_with(|| entry_index.next());
+                        upsert_normalized_entry(
+                            &msg_store,
+                            index,
+                            NormalizedEntry {
+                                timestamp: None,
+                                entry_type: NormalizedEntryType::TokenUsageInfo(usage.clone()),
+                                content,
+                                metadata: None,
+                            },
+                            is_new,
+                        );
                     }
                     AcpEvent::Message(content) => {
                         streaming.thinking_text = None;
@@ -901,10 +956,11 @@ mod tests {
 
     use super::*;
 
-    /// Error entries normalized from one logged event, as JSON
-    async fn errors_for(event: AcpEvent) -> Vec<serde_json::Value> {
+    async fn entries_for(events: impl IntoIterator<Item = AcpEvent>) -> Vec<serde_json::Value> {
         let msg_store = Arc::new(MsgStore::new());
-        msg_store.push_stdout(format!("{event}\n"));
+        for event in events {
+            msg_store.push_stdout(format!("{event}\n"));
+        }
         msg_store.push_finished();
         for handle in normalize_logs(msg_store.clone(), Path::new("/tmp")) {
             handle.await.unwrap();
@@ -918,8 +974,53 @@ mod tests {
             })
             .flat_map(|patch| patch.as_array().cloned().unwrap_or_default())
             .map(|op| op["value"]["content"].clone())
+            .collect()
+    }
+
+    async fn errors_for(event: AcpEvent) -> Vec<serde_json::Value> {
+        entries_for([event])
+            .await
+            .into_iter()
             .filter(|entry| entry["entry_type"]["type"] == "error_message")
             .collect()
+    }
+
+    #[tokio::test]
+    async fn context_and_billing_share_one_latest_usage_entry() {
+        let context = |used, cost_usd| {
+            AcpEvent::Usage(AcpUsageUpdate::Context {
+                used,
+                size: 200_000,
+                cost_usd,
+            })
+        };
+        let prompt = |input_tokens| {
+            AcpEvent::Usage(AcpUsageUpdate::Prompt(crate::logs::ExecutionTokenUsage {
+                input_tokens,
+                cumulative: true,
+                ..Default::default()
+            }))
+        };
+        let entries = entries_for([
+            context(1000, None),
+            context(1500, Some(0.125)),
+            prompt(400),
+            context(800, None),
+            prompt(450),
+        ])
+        .await;
+        let context_only = &entries[0]["entry_type"];
+        assert_eq!(context_only["total_tokens"], 1000);
+        assert!(context_only.get("billing").is_none());
+        let cost_only = &entries[1]["entry_type"]["billing"];
+        assert_eq!(cost_only["input_tokens"], 0);
+        assert_eq!(cost_only["cost_usd"], 0.125);
+        let latest = &entries[4]["entry_type"];
+        assert_eq!(latest["total_tokens"], 800);
+        assert_eq!(latest["model_context_window"], 200_000);
+        assert_eq!(latest["billing"]["input_tokens"], 450);
+        assert_eq!(latest["billing"]["cost_usd"], 0.125);
+        assert_eq!(latest["billing"]["cumulative"], true);
     }
 
     #[tokio::test]

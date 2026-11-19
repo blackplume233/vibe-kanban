@@ -334,7 +334,6 @@ fn get_fresh_path_blocking() -> Option<String> {
 
     paths
         .into_iter()
-        .map(OsString::from)
         .reduce(|a, b| merge_paths(&a, &b))
         .map(|merged| merged.to_string_lossy().into_owned())
 }

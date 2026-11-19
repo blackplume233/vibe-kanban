@@ -35,11 +35,9 @@ fn fix_duplicate_version_resources() {
     // with an empty stub so duplicates from LIBPATH search contribute nothing.
     let our_resource = out_dir.join("resource.lib");
     let renamed = out_dir.join("tauri_resource.lib");
-    if our_resource.exists() {
-        if std::fs::copy(&our_resource, &renamed).is_ok() {
-            let _ = std::fs::write(&our_resource, empty_res_file());
-            println!("cargo:rustc-link-arg-bins={}", renamed.display());
-        }
+    if our_resource.exists() && std::fs::copy(&our_resource, &renamed).is_ok() {
+        let _ = std::fs::write(&our_resource, empty_res_file());
+        println!("cargo:rustc-link-arg-bins={}", renamed.display());
     }
 
     // Neutralize codex-windows-sandbox's resource.lib too

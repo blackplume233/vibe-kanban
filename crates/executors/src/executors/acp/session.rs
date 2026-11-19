@@ -78,6 +78,7 @@ impl SessionManager {
             | AcpEvent::AuthRequired(..)
             | AcpEvent::Done(..)
             | AcpEvent::SessionConfig(..)
+            | AcpEvent::Usage(..)
             | AcpEvent::Other(..) => return None,
 
             AcpEvent::User(..)

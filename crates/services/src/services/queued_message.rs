@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
-use db::models::scratch::DraftFollowUpData;
+use db::models::{execution_queue::StoredFollowUp, scratch::DraftFollowUpData};
 use serde::{Deserialize, Serialize};
+use sqlx::{Error, SqlitePool};
+use tokio::sync::Notify;
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -28,63 +29,57 @@ pub enum QueueStatus {
     Queued { message: QueuedMessage },
 }
 
-/// In-memory service for managing queued follow-up messages.
-/// One queued message per session.
+/// The legacy editor has one replaceable draft per session. Once promoted,
+/// each draft is an independent entry in the global execution queue.
 #[derive(Clone)]
 pub struct QueuedMessageService {
-    queue: Arc<DashMap<Uuid, QueuedMessage>>,
+    pool: SqlitePool,
+    pub scheduler_changed: Arc<Notify>,
 }
 
 impl QueuedMessageService {
-    pub fn new() -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self {
-            queue: Arc::new(DashMap::new()),
+            pool,
+            scheduler_changed: Arc::new(Notify::new()),
         }
     }
 
-    /// Queue a message for a session. Replaces any existing queued message.
-    pub fn queue_message(&self, session_id: Uuid, data: DraftFollowUpData) -> QueuedMessage {
-        let queued = QueuedMessage {
-            session_id,
-            data,
-            queued_at: Utc::now(),
-        };
-        self.queue.insert(session_id, queued.clone());
-        queued
+    pub async fn queue_message(
+        &self,
+        session_id: Uuid,
+        data: DraftFollowUpData,
+    ) -> Result<QueuedMessage, Error> {
+        Ok(StoredFollowUp::save(&self.pool, session_id, data)
+            .await?
+            .into())
     }
 
-    /// Cancel/remove a queued message for a session
-    pub fn cancel_queued(&self, session_id: Uuid) -> Option<QueuedMessage> {
-        self.queue.remove(&session_id).map(|(_, v)| v)
+    pub async fn cancel_queued(&self, session_id: Uuid) -> Result<(), Error> {
+        StoredFollowUp::delete(&self.pool, session_id, None).await?;
+        Ok(())
     }
 
-    /// Get the queued message for a session (if any)
-    pub fn get_queued(&self, session_id: Uuid) -> Option<QueuedMessage> {
-        self.queue.get(&session_id).map(|r| r.clone())
+    pub async fn has_queued(&self, session_id: Uuid) -> Result<bool, Error> {
+        Ok(StoredFollowUp::get(&self.pool, session_id).await?.is_some())
     }
 
-    /// Take (remove and return) the queued message for a session.
-    /// Used by finalization flow to consume the queued message.
-    pub fn take_queued(&self, session_id: Uuid) -> Option<QueuedMessage> {
-        self.queue.remove(&session_id).map(|(_, v)| v)
-    }
-
-    /// Check if a session has a queued message
-    pub fn has_queued(&self, session_id: Uuid) -> bool {
-        self.queue.contains_key(&session_id)
-    }
-
-    /// Get queue status for frontend display
-    pub fn get_status(&self, session_id: Uuid) -> QueueStatus {
-        match self.get_queued(session_id) {
-            Some(msg) => QueueStatus::Queued { message: msg },
+    pub async fn get_status(&self, session_id: Uuid) -> Result<QueueStatus, Error> {
+        Ok(match StoredFollowUp::get(&self.pool, session_id).await? {
+            Some(message) => QueueStatus::Queued {
+                message: message.into(),
+            },
             None => QueueStatus::Empty,
-        }
+        })
     }
 }
 
-impl Default for QueuedMessageService {
-    fn default() -> Self {
-        Self::new()
+impl From<StoredFollowUp> for QueuedMessage {
+    fn from(stored: StoredFollowUp) -> Self {
+        Self {
+            session_id: stored.session_id,
+            data: stored.payload.0,
+            queued_at: stored.queued_at,
+        }
     }
 }

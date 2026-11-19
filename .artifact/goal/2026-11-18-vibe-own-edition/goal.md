@@ -1,13 +1,13 @@
 ---
 status: active
-updated_at: 2026-11-18
+updated_at: 2026-11-19
 artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: loop-003
-next_sub_goal: M1：让 Win32 与 Web 探针通过真实本地 vibe server 的 HTTP API 读取并展示同一条工作区记录，保存两端截图和请求日志。
-last_verified_loop: loop-003
+current_loop: loop-006
+next_sub_goal: 集成 M3 双端展示页与 M5/M6 后端，验证正式 NSH 包及本地操作界面。
+last_verified_loop: loop-006
 termination_reason: null
 handoff_summary: null
 references: references.md
@@ -54,6 +54,7 @@ references: references.md
 - 后端能力（本地议题、GitHub、ACP）在 Rust crate 中实现并经 API 暴露，与 UI 技术无关；UI 只消费 API。
 - 宽里程碑（M3 设计系统、M4 议题与交互、M5 GitHub、M6 ACP）各建 `child-goals/<slug>/` 子 Auto Goal；子代理只在隔离 worktree 内写入，报告写 `subagents/`。
 - 每个子目标完成后：跑对应验证命令、截图/日志存 `evidence/`、更新 `plan.md` 里程碑状态，再用 `commit` 提交到 `my/main`。
+- 本会话协调各独立 worktree，验收 E1–E7 并通过终止审计后推送 `origin/my/main`。中间阶段保留本地提交。
 - 失败按类别（`bad-goal|bad-plan|bad-evidence|missing-prerequisite|external-blocker|wrong-direction`）写入 `references.md`，换方法再试，禁止无变化重试。
 - 定期 `git fetch upstream`，仅在里程碑之间评估合并上游修复。
 - 决策（2026-11-18 用户指示“安排 GPT-6.2-Sol 以 dynamic workflow 推进完成所有任务”，视为确认目标并采用以下推荐默认；用户可随时修改本节）：

@@ -21,8 +21,9 @@ use crate::{
     approvals::ToolCallMetadata,
     logs::{
         ActionType, AnsweredQuestion, AskUserQuestionItem, AskUserQuestionOption,
-        CommandExitStatus, CommandRunResult, FileChange, NormalizedEntry, NormalizedEntryError,
-        NormalizedEntryType, TodoItem, TokenUsageInfo, ToolResult, ToolStatus,
+        CommandExitStatus, CommandRunResult, ExecutionTokenUsage, FileChange, NormalizedEntry,
+        NormalizedEntryError, NormalizedEntryType, TodoItem, TokenUsageInfo, ToolResult,
+        ToolStatus,
         stderr_processor::normalize_stderr_logs,
         utils::{
             EntryIndexProvider,
@@ -84,6 +85,7 @@ pub(super) fn normalize_logs(
                     total_tokens,
                     model_context_window,
                 } => {
+                    state.context_usage = (total_tokens, model_context_window);
                     add_normalized_entry(
                         &msg_store,
                         &entry_index,
@@ -92,6 +94,7 @@ pub(super) fn normalize_logs(
                             entry_type: NormalizedEntryType::TokenUsageInfo(TokenUsageInfo {
                                 total_tokens,
                                 model_context_window,
+                                billing: None,
                             }),
                             content: format!(
                                 "Tokens used: {} / Context window: {}",
@@ -214,7 +217,10 @@ enum PartKind {
 struct LogState {
     entry_index: EntryIndexProvider,
     msg_store: Arc<MsgStore>,
-    message_roles: HashMap<String, MessageRole>,
+    message_roles: HashMap<MessageId, MessageRole>,
+    message_models: HashMap<MessageId, String>,
+    step_usage_entries: HashMap<PartId, usize>,
+    context_usage: (u32, u32),
     assistant_text: HashMap<PartId, StreamingText>,
     thinking_text: HashMap<PartId, StreamingText>,
     part_kinds: HashMap<PartId, (MessageId, PartKind)>,
@@ -233,6 +239,9 @@ impl LogState {
             entry_index,
             msg_store,
             message_roles: HashMap::new(),
+            message_models: HashMap::new(),
+            step_usage_entries: HashMap::new(),
+            context_usage: (0, 0),
             assistant_text: HashMap::new(),
             thinking_text: HashMap::new(),
             part_kinds: HashMap::new(),
@@ -261,6 +270,13 @@ impl LogState {
             SdkEvent::MessageUpdated(event) => {
                 let info = event.info;
                 self.maybe_emit_model_system_message(&info);
+                if info.role == MessageRole::Assistant
+                    && let Some(model) = info.model_id()
+                    && !self.message_models.contains_key(&info.id)
+                {
+                    self.message_models
+                        .insert(info.id.clone(), model.to_string());
+                }
                 self.message_roles.insert(info.id, info.role);
             }
             SdkEvent::MessagePartUpdated(event) => {
@@ -528,6 +544,38 @@ impl LogState {
                 } else {
                     let index = add_normalized_entry(msg_store, &self.entry_index, entry);
                     tool_state.index = Some(index);
+                }
+            }
+            Part::StepFinish(part) => {
+                // One discrete charge per completed step. The enclosing message's
+                // cost is running, and the SDK can replay the same part ID.
+                let (total_tokens, model_context_window) = self.context_usage;
+                let tokens = part.tokens;
+                let entry = NormalizedEntry {
+                    timestamp: None,
+                    entry_type: NormalizedEntryType::TokenUsageInfo(TokenUsageInfo {
+                        total_tokens,
+                        model_context_window,
+                        billing: Some(ExecutionTokenUsage {
+                            model: self.message_models.get(&part.message_id).cloned(),
+                            input_tokens: tokens.input,
+                            output_tokens: tokens.output.saturating_add(tokens.reasoning),
+                            cache_read_tokens: tokens.cache.read,
+                            cache_write_tokens: tokens.cache.write,
+                            cost_usd: part.cost,
+                            cumulative: false,
+                        }),
+                    }),
+                    content: "Token usage".to_string(),
+                    metadata: None,
+                };
+                match self.step_usage_entries.entry(part.id) {
+                    std::collections::hash_map::Entry::Occupied(index) => {
+                        replace_normalized_entry(msg_store, *index.get(), entry);
+                    }
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(add_normalized_entry(msg_store, &self.entry_index, entry));
+                    }
                 }
             }
             Part::Other => {}
@@ -1564,4 +1612,76 @@ fn parse_question_items(items: &[Value]) -> Vec<AskUserQuestionItem> {
         .filter_map(|v| serde_json::from_value(v.clone()).ok())
         .collect();
     parse_question_items_from_info(&infos)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use workspace_utils::log_msg::LogMsg;
+
+    use super::*;
+    use crate::logs::utils::patch::extract_normalized_entry_from_patch;
+
+    #[tokio::test]
+    async fn completed_step_billing_uses_the_part_id_to_handle_replay() {
+        let sdk = |event| OpencodeExecutorEvent::SdkEvent { event };
+        let step = |cost| {
+            sdk(json!({
+                "type": "message.part.updated",
+                "properties": {"part": {
+                    "type": "step-finish", "id": "step1", "messageID": "message1",
+                    "cost": cost,
+                    "tokens": {"input": 5, "output": 7, "reasoning": 3, "cache": {"read": 11, "write": 13}}
+                }}
+            }))
+        };
+        let msg_store = Arc::new(MsgStore::new());
+        for event in [
+            sdk(json!({
+                "type": "message.updated",
+                "properties": {"info": {"id": "message1", "role": "assistant", "modelID": "test-model"}}
+            })),
+            OpencodeExecutorEvent::TokenUsage {
+                total_tokens: 50,
+                model_context_window: 200_000,
+            },
+            step(0.125),
+            step(0.25),
+        ] {
+            msg_store.push_stdout(format!("{}\n", serde_json::to_string(&event).unwrap()));
+        }
+        msg_store.push_finished();
+        for handle in normalize_logs(msg_store.clone(), Path::new("/tmp")) {
+            handle.await.unwrap();
+        }
+        let mut entries = std::collections::BTreeMap::new();
+        for msg in msg_store.get_history() {
+            if let LogMsg::JsonPatch(patch) = msg
+                && let Some((index, entry)) = extract_normalized_entry_from_patch(&patch)
+                && let NormalizedEntryType::TokenUsageInfo(usage) = entry.entry_type
+            {
+                entries.insert(index, usage);
+            }
+        }
+        assert_eq!(entries.len(), 2);
+        let mut entries = entries.into_values();
+        assert!(entries.next().unwrap().billing.is_none());
+        let usage = entries.next().unwrap();
+        assert_eq!(
+            (usage.total_tokens, usage.model_context_window),
+            (50, 200_000)
+        );
+        assert_eq!(
+            usage.billing,
+            Some(ExecutionTokenUsage {
+                model: Some("test-model".into()),
+                input_tokens: 5,
+                output_tokens: 10,
+                cache_read_tokens: 11,
+                cache_write_tokens: 13,
+                cost_usd: Some(0.25),
+                cumulative: false,
+            })
+        );
+    }
 }
