@@ -9062,7 +9062,6 @@ dependencies = [
  "relay-webrtc",
  "relay-ws",
  "reqwest 0.13.2",
- "rust-embed",
  "rustls",
  "schemars 1.2.1",
  "sentry",

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{self, Error as AnyhowError};
 use axum::Router;
 use deployment::{Deployment, DeploymentError};
@@ -99,10 +101,15 @@ async fn main() -> Result<(), VibeKanbanError> {
         .set_preview_proxy_port(actual_proxy_port)
         .expect("client preview proxy port already set");
 
-    let app_router = routes::router(deployment.clone());
+    let web_root = std::env::var_os("VK_WEB_ROOT")
+        .filter(|root| !root.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| Some(std::env::current_exe().ok()?.parent()?.join("web")))
+        .filter(|root| root.join("index.html").is_file());
+    let app_router = routes::router(deployment.clone(), web_root.as_deref());
 
-    // Production only: open browser
-    if !cfg!(debug_assertions) {
+    // Production only: open the browser when a Web package is installed.
+    if !cfg!(debug_assertions) && web_root.is_some() {
         tracing::info!("Opening browser...");
         let browser_port = actual_main_port;
         tokio::spawn(async move {
