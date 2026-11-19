@@ -5,9 +5,9 @@ artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: loop-004
-next_sub_goal: 验收首批独立 worktree 交付，集成通过的变更；M1 用真实本地服务验证 Win32 和 Web 数据通路。
-last_verified_loop: loop-003
+current_loop: loop-005
+next_sub_goal: 复验 M1 的锁定 nightly 依赖调整，集成 M5 和 M6 的队列接线，验证双端展示页和正式包。
+last_verified_loop: loop-005
 termination_reason: null
 handoff_summary: null
 references: references.md

@@ -20,9 +20,9 @@
 | 本地提交 | eval `commit` 命名空间 | 子 agent 各自负责独立 worktree 的本地提交，协调者负责集成分支 |
 | 推送 | `git push origin my/main` | M0–M7 和 E1–E7 全部通过并完成终止审计后推送 |
 | 安装用户级工具链 | `rustup target add`、`cargo install`、`pnpm` | 允许；系统级软件（MSI、winget）未授权 |
-| GitHub 远端写（建仓库、开 PR、建 Issue、配 webhook、改设置） | 无 | 未授权；记入 `status.md` 的「待人工决策」 |
+| GitHub 集成验收 | `gh`、GitHub 客户端和 Git | 仅对私有 `blackplume233/vibe-own-sandbox` 的测试分支、CI、评审与 Issue 执行 E5 验收。凭据仅用于当前测试进程。 |
 
-- 实体范围：仅 `blackplume233/vibe-kanban` fork 与本机；不触碰其他仓库的工作区（参考仓库只读）。
+- 实体范围为 `blackplume233/vibe-kanban` fork、E5 私有测试仓库和本机。参考仓库只读。
 
 ## Executor
 
