@@ -19,4 +19,5 @@
 
 - 使用仓库声明的 `nightly-2026-08-01` 构建真实 `server` 与 Windows、Wasm 独立挂载验证程序。Rust 格式检查及两个 JS 源文件的 `node --check` 通过。验证使用真实 SQLite 记录、两个 Git worktree 和服务端启动的 PowerShell ConPTY。构建、日志、截图与验证入口都在 `F:/vk-targets/m7-terminal/`。
 - Web Chromium 中，从工作区 A 读回 A 标记，窗口变窄后 ConPTY 从 `144×16` 变为 `99×16`。浮层遮挡时 iframe 隐藏，关闭浮层后同一个 PowerShell PID 继续交互。切到 B 后旧 PID 退出，手动收起 B 后新 PID 退出。重新打开 B 后以一条命令打印末尾标记并退出。完整标记和唯一 `exited` 帧到达、iframe 移除、焦点回到打开按钮。见 `web-interaction.log`、`web-terminal.png` 和 `web-overlay.png`。
-- Windows WebView2 中，从工作区 A 读回 A 标记，窗口变窄后 ConPTY 从 `141×16` 变为 `101×16`。浮层的关闭按钮可操作，关闭浮层后同一 PID 恢复交互。切换到 B 和手动收起分别终止对应的旧 PID。再次打开 B 后，新的 PowerShell PID 打印 `PTY-FINAL-OUTPUT-END` 并执行 `exit`。WebView 收到完整末尾输出和唯一 `exited` 帧，面板自动收起。见 `windows-interaction.log` 至交互断言结束、`windows-terminal.png` 和 `windows-overlay.png`。本轮在交互断言全部输出后，外部验证脚本的资源清理未在命令限时内返回。
+- Windows WebView2 中，从工作区 A 读回 A 标记，窗口变窄后 ConPTY 从 `141×16` 变为 `101×16`。浮层关闭后同一 PID 恢复交互。切换到 B 和手动收起分别终止对应的旧 PID。再次打开 B 后，新的 PowerShell PID 打印 `PTY-FINAL-OUTPUT-END` 并执行 `exit`。WebView 收到完整末尾输出和唯一 `exited` 帧，面板自动收起。见 `windows-terminal.png`、`windows-overlay.png` 和 `windows-clean-exit.log`。
+- Win32 探针在退出链路加了分段日志，并用 `WM_CLOSE` 正常关闭验证窗口。重新验证时，采集器正常退出，NSH 原生进程退出码为 `0`，Playwright 驱动正常停止，两套临时工作区与仓库删除成功，服务停止，整条命令退出码为 `0`。本轮未复现早先的清理超时，无法确定早先具体卡在哪个调用。重开终端期间 Playwright 出现长等待并自行恢复，完整日志保留在 `F:/vk-targets/m7-terminal/windows-clean-exit.log`。
