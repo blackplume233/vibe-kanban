@@ -17,6 +17,7 @@ use db::{
         execution_process_repo_state::{
             CreateExecutionProcessRepoState, ExecutionProcessRepoState,
         },
+        execution_queue::ScheduledExecution,
         repo::Repo,
         session::{CreateSession, Session, SessionError},
         workspace::{Workspace, WorkspaceError},
@@ -190,13 +191,11 @@ pub trait ContainerService {
         }
     }
 
-    async fn store_db_stream_handle(&self, id: Uuid, handle: JoinHandle<()>);
-
-    async fn take_db_stream_handle(&self, id: &Uuid) -> Option<JoinHandle<()>>;
-
     async fn create(&self, workspace: &Workspace) -> Result<ContainerRef, ContainerError>;
 
     async fn kill_all_running_processes(&self) -> Result<(), ContainerError>;
+
+    fn start_execution_scheduler(&self);
 
     async fn delete(&self, workspace: &Workspace) -> Result<(), ContainerError>;
 
@@ -277,6 +276,9 @@ pub trait ContainerService {
     async fn cleanup_orphan_executions(&self) -> Result<(), ContainerError> {
         let running_processes = ExecutionProcess::find_running(&self.db().pool).await?;
         for process in running_processes {
+            if ScheduledExecution::is_waiting(&self.db().pool, process.id).await? {
+                continue;
+            }
             tracing::info!(
                 "Found orphaned execution process {} for session {}",
                 process.id,
@@ -757,6 +759,13 @@ pub trait ContainerService {
         executor_action: &ExecutorAction,
     ) -> Result<(), ContainerError>;
 
+    async fn launch_execution(
+        &self,
+        workspace: &Workspace,
+        execution_process: &ExecutionProcess,
+        executor_action: &ExecutorAction,
+    ) -> Result<(), ContainerError>;
+
     async fn stop_execution(
         &self,
         execution_process: &ExecutionProcess,
@@ -1171,6 +1180,27 @@ pub trait ContainerService {
         executor_action: &ExecutorAction,
         run_reason: &ExecutionProcessRunReason,
     ) -> Result<ExecutionProcess, ContainerError> {
+        let execution_process = self
+            .prepare_execution(workspace, session, executor_action, run_reason)
+            .await?;
+        if let Err(start_error) = self
+            .start_execution_inner(workspace, &execution_process, executor_action)
+            .await
+        {
+            self.execution_start_failed(&execution_process, &start_error)
+                .await;
+            return Err(start_error);
+        }
+        Ok(execution_process)
+    }
+
+    async fn prepare_execution(
+        &self,
+        workspace: &Workspace,
+        session: &Session,
+        executor_action: &ExecutorAction,
+        run_reason: &ExecutionProcessRunReason,
+    ) -> Result<ExecutionProcess, ContainerError> {
         // Create new execution process record
         // Capture current HEAD per repository as the "before" commit for this execution
         let repositories =
@@ -1211,17 +1241,16 @@ pub trait ContainerService {
             &repo_states,
         )
         .await?;
-        self.msg_stores()
-            .write()
-            .await
-            .insert(execution_process.id, Arc::new(MsgStore::new()));
         if *run_reason != ExecutionProcessRunReason::ArchiveScript
             && let Err(e) = Workspace::set_archived(&self.db().pool, workspace.id, false).await
         {
-            self.msg_stores()
-                .write()
-                .await
-                .remove(&execution_process.id);
+            ExecutionProcess::update_completion(
+                &self.db().pool,
+                execution_process.id,
+                ExecutionProcessStatus::Failed,
+                None,
+            )
+            .await?;
             return Err(e.into());
         }
 
@@ -1251,88 +1280,103 @@ pub trait ContainerService {
             )
             .await
             {
-                self.msg_stores()
-                    .write()
-                    .await
-                    .remove(&execution_process.id);
+                ExecutionProcess::update_completion(
+                    &self.db().pool,
+                    execution_process.id,
+                    ExecutionProcessStatus::Failed,
+                    None,
+                )
+                .await?;
                 return Err(e.into());
             }
         }
 
-        if let Err(start_error) = self
-            .start_execution_inner(workspace, &execution_process, executor_action)
+        Ok(execution_process)
+    }
+
+    async fn execution_start_failed(
+        &self,
+        execution_process: &ExecutionProcess,
+        start_error: &ContainerError,
+    ) {
+        if let Some(store) = self
+            .msg_stores()
+            .write()
             .await
+            .remove(&execution_process.id)
         {
-            self.msg_stores()
-                .write()
-                .await
-                .remove(&execution_process.id);
-            // Mark process as failed
-            if let Err(update_error) = ExecutionProcess::update_completion(
-                &self.db().pool,
+            store.push_finished();
+        }
+        // Mark process as failed
+        if let Err(update_error) = ExecutionProcess::update_completion(
+            &self.db().pool,
+            execution_process.id,
+            ExecutionProcessStatus::Failed,
+            None,
+        )
+        .await
+        {
+            tracing::error!(
+                "Failed to mark execution process {} as failed after start error: {}",
                 execution_process.id,
-                ExecutionProcessStatus::Failed,
-                None,
-            )
-            .await
-            {
-                tracing::error!(
-                    "Failed to mark execution process {} as failed after start error: {}",
-                    execution_process.id,
-                    update_error
-                );
-            }
-            // Emit stderr error message
-            let log_message = LogMsg::Stderr(format!("Failed to start execution: {start_error}"));
+                update_error
+            );
+        }
+        // Emit stderr error message
+        let log_message = LogMsg::Stderr(format!("Failed to start execution: {start_error}"));
+        if let Err(e) = execution_process::append_log_message(
+            execution_process.session_id,
+            execution_process.id,
+            &log_message,
+        )
+        .await
+        {
+            tracing::error!(
+                "Failed to write error log for execution {}: {}",
+                execution_process.id,
+                e
+            );
+        }
+
+        // Emit NextAction with failure context for coding agent requests
+        if let ContainerError::ExecutorError(ExecutorError::ExecutableNotFound { program }) =
+            start_error
+        {
+            let help_text = format!("The required executable `{program}` is not installed.");
+            let error_message = NormalizedEntry {
+                timestamp: None,
+                entry_type: NormalizedEntryType::ErrorMessage {
+                    error_type: NormalizedEntryError::SetupRequired,
+                },
+                content: help_text,
+                metadata: None,
+            };
+            let patch = ConversationPatch::add_normalized_entry(2, error_message);
             if let Err(e) = execution_process::append_log_message(
-                session.id,
+                execution_process.session_id,
                 execution_process.id,
-                &log_message,
+                &LogMsg::JsonPatch(patch),
             )
             .await
             {
                 tracing::error!(
-                    "Failed to write error log for execution {}: {}",
+                    "Failed to write setup-required log for execution {}: {}",
                     execution_process.id,
                     e
                 );
             }
+        };
+    }
 
-            // Emit NextAction with failure context for coding agent requests
-            if let ContainerError::ExecutorError(ExecutorError::ExecutableNotFound { program }) =
-                &start_error
-            {
-                let help_text = format!("The required executable `{program}` is not installed.");
-                let error_message = NormalizedEntry {
-                    timestamp: None,
-                    entry_type: NormalizedEntryType::ErrorMessage {
-                        error_type: NormalizedEntryError::SetupRequired,
-                    },
-                    content: help_text,
-                    metadata: None,
-                };
-                let patch = ConversationPatch::add_normalized_entry(2, error_message);
-                if let Err(e) = execution_process::append_log_message(
-                    session.id,
-                    execution_process.id,
-                    &LogMsg::JsonPatch(patch),
-                )
-                .await
-                {
-                    tracing::error!(
-                        "Failed to write setup-required log for execution {}: {}",
-                        execution_process.id,
-                        e
-                    );
-                }
-            };
-            return Err(start_error);
-        }
-
-        // Start processing normalised logs for executor requests and follow ups
+    fn normalize_execution_logs(
+        &self,
+        workspace: &Workspace,
+        executor_action: &ExecutorAction,
+        msg_store: Arc<MsgStore>,
+    ) -> Vec<JoinHandle<()>> {
         let workspace_root = self.workspace_to_current_dir(workspace);
         #[cfg_attr(feature = "qa-mode", allow(unused_variables))]
-        if let Some((executor_profile_id, working_dir)) = match executor_action.typ() {
+        let Some((executor_profile_id, working_dir)) = (match executor_action.typ() {
             ExecutorActionType::CodingAgentInitialRequest(request) => Some((
                 request.executor_config.profile_id(),
                 request.effective_dir(&workspace_root),
@@ -1346,47 +1390,26 @@ pub trait ContainerService {
                 request.effective_dir(&workspace_root),
             )),
             _ => None,
-        } {
-            let msg_store = match self.get_msg_store_by_id(&execution_process.id).await {
-                Some(store) => store,
-                None => {
-                    self.msg_stores()
-                        .write()
-                        .await
-                        .remove(&execution_process.id);
-                    return Err(ContainerError::Other(anyhow!(
-                        "MsgStore missing for execution {} during normalization setup",
-                        execution_process.id
-                    )));
-                }
-            };
-            #[cfg(feature = "qa-mode")]
+        }) else {
+            return Vec::new();
+        };
+        #[cfg(feature = "qa-mode")]
+        {
+            QaMockExecutor.normalize_logs(msg_store, &working_dir)
+        }
+        #[cfg(not(feature = "qa-mode"))]
+        {
+            if let Some(executor) =
+                ExecutorConfigs::get_cached().get_coding_agent(&executor_profile_id)
             {
-                let executor = QaMockExecutor;
-                let _ = executor.normalize_logs(msg_store, &working_dir);
-            }
-            #[cfg(not(feature = "qa-mode"))]
-            {
-                if let Some(executor) =
-                    ExecutorConfigs::get_cached().get_coding_agent(&executor_profile_id)
-                {
-                    let _ = executor.normalize_logs(msg_store, &working_dir);
-                } else {
-                    tracing::error!(
-                        "Failed to resolve profile '{:?}' for normalization",
-                        executor_profile_id
-                    );
-                }
+                executor.normalize_logs(msg_store, &working_dir)
+            } else {
+                tracing::error!(
+                    "Failed to resolve profile '{executor_profile_id}' for normalization"
+                );
+                Vec::new()
             }
         }
-
-        execution_process::spawn_stream_raw_logs_to_storage(
-            self.msg_stores().clone(),
-            self.db().clone(),
-            execution_process.id,
-            session.id,
-        );
-        Ok(execution_process)
     }
 
     async fn try_start_next_action(&self, ctx: &ExecutionContext) -> Result<(), ContainerError> {

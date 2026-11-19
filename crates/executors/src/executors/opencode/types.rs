@@ -327,8 +327,50 @@ pub(super) enum Part {
     Reasoning(ReasoningPart),
     #[serde(rename = "tool")]
     Tool(Box<ToolPart>),
+    #[serde(rename = "step-finish")]
+    StepFinish(StepFinishPart),
     #[serde(other)]
     Other,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct StepFinishPart {
+    pub(super) id: String,
+    #[serde(rename = "messageID")]
+    pub(super) message_id: String,
+    pub(super) cost: Option<f64>,
+    pub(super) tokens: StepFinishTokens,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct StepFinishTokens {
+    #[serde(default, deserialize_with = "deserialize_token_count")]
+    pub(super) input: u64,
+    #[serde(default, deserialize_with = "deserialize_token_count")]
+    pub(super) output: u64,
+    #[serde(default, deserialize_with = "deserialize_token_count")]
+    pub(super) reasoning: u64,
+    #[serde(default)]
+    pub(super) cache: StepFinishCache,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct StepFinishCache {
+    #[serde(default, deserialize_with = "deserialize_token_count")]
+    pub(super) read: u64,
+    #[serde(default, deserialize_with = "deserialize_token_count")]
+    pub(super) write: u64,
+}
+
+fn deserialize_token_count<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u64, D::Error> {
+    let count = Option::<serde_json::Number>::deserialize(deserializer)?;
+    Ok(count.map_or(0, |count| {
+        count
+            .as_u64()
+            .unwrap_or_else(|| count.as_f64().unwrap_or_default().round() as u64)
+    }))
 }
 
 #[derive(Debug, Deserialize)]

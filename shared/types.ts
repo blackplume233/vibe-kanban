@@ -733,7 +733,11 @@ export type NormalizedEntryType = { "type": "user_message" } | { "type": "user_f
  */
 executor_profile_id?: ExecutorProfileId, } | { "type": "token_usage_info" } & TokenUsageInfo | { "type": "user_answered_questions", answers: Array<AnsweredQuestion>, };
 
-export type TokenUsageInfo = { total_tokens: number, model_context_window: number, };
+export type TokenUsageInfo = { 
+/**
+ * Occupancy of the model context, independent of provider billing.
+ */
+total_tokens: number, model_context_window: number, billing?: ExecutionTokenUsage, };
 
 export type FileChange = { "action": "write", content: string, } | { "action": "delete" } | { "action": "rename", new_path: string, } | { "action": "edit", 
 /**
@@ -908,6 +912,34 @@ sdp: string,
  * Echoed session identifier from the offer.
  */
 session_id: string, };
+
+export type ExecutionTokenUsage = { model: string | null, input_tokens: number, output_tokens: number, cache_read_tokens: number, cache_write_tokens: number, 
+/**
+ * The provider's reported USD cost, which can be an estimate.
+ */
+cost_usd: number | null, 
+/**
+ * True for a session/thread snapshot that can include earlier executions.
+ * Compare snapshots of the same session to derive deltas; never sum them.
+ * False for a discrete invocation or message that can be counted once.
+ */
+cumulative: boolean, };
+
+export type ExecutionUsageQuery = { session_id: string | null, workspace_id: string | null, from: string | null, to: string | null, };
+
+export type ExecutionUsageTotal = { executor: string, model: string | null, input_tokens: number, output_tokens: number, cache_read_tokens: number, cache_write_tokens: number, cost_usd: number | null, unpriced_samples: number, };
+
+export type ExecutionPrice = { executor: string, 
+/**
+ * Exact model ID, or `*` for the executor's default rates.
+ */
+model: string, input_usd_per_million: number, output_usd_per_million: number, cache_read_usd_per_million: number, cache_write_usd_per_million: number, };
+
+export type ExecutionSchedulerConfig = { max_concurrent: number, };
+
+export type ScheduledExecution = { execution_process_id: string, session_id: string, workspace_id: string, priority: number, queued_at: string, };
+
+export type ExecutionQueuePriority = { priority: number, };
 
 export type CreateLocalProject = { name: string, };
 
