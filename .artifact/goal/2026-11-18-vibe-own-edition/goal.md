@@ -1,15 +1,15 @@
 ---
-status: active
+status: complete
 updated_at: 2026-11-20
 artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
 current_loop: loop-008
-next_sub_goal: 复验合入 my/main 的 NSH 默认构建、双端发布包和 E1–E7 证据，再执行终止审计与推送。
+next_sub_goal: null
 last_verified_loop: loop-008
-termination_reason: null
-handoff_summary: null
+termination_reason: E1–E7 通过审计，363 项测试通过，Win32 和 Web 包实机验收通过，origin/my/main 已读回发布提交。
+handoff_summary: 已完成：E1–E7 通过审计，363 项测试通过，Win32 和 Web 包实机验收通过，origin/my/main 已读回发布提交；最后验证：loop-008。
 references: references.md
 ---
 

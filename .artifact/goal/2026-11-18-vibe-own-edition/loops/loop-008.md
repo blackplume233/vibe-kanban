@@ -25,6 +25,6 @@
 
 ## 终止检查
 
-- decision: continue
-- reason: E1–E7 已验收，准备推送并读取远端分支。
-- remaining_evidence: 远端 `my/main` 读回。
+- decision: complete
+- reason: E1–E7 已验收。发布提交 `50a3c2c7b2dd9644b3d940fc9b72fc06d3859bb4` 已推送，并从 `origin/my/main` 读回。
+- remaining_evidence: 无。

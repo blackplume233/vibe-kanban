@@ -28,6 +28,7 @@
 ## Gate
 
 - [最终构建](../evidence/m0-build.md#集成候选复验)覆盖 363 项工作区测试、双端正式包和真实运行。
+- `origin/my/main` 已读回发布提交 `50a3c2c7b2dd9644b3d940fc9b72fc06d3859bb4`。E1–E7 的证据见 [终止审计](../plan.md#终止记录)。
 - [共享产品包](../subagents/m7-package-report.md#共享产品入口复验)通过 Win32 和 Chrome 实机验收。
 - Win32 5,005 条议题首次滚动 721.6 ms，最高主线程帧耗时 p95 6.84 ms。Chromium 前台首次键盘操作 685.9 ms，渲染 p95 2.712 ms。见 [产品交互证据](../evidence/product-interaction.md)。
 - M6 协议升级在 `4cb6f061c` 通过 185 项测试，5 项忽略。单独复验 `session/new` 和 `session/load` 均从真实 MCP 进程发现 `list_repos`。M5 集成复验的 73 项测试及生成检查通过，原始日志为 `F:/vk-targets/main/m5-acp-integration.log`。

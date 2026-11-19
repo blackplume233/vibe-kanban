@@ -57,8 +57,9 @@ E1–E7 通过终止审计。
 
 ## 终止记录
 
-- outcome: verified，等待远端分支读回
+- outcome: complete
 - reason: E1–E7 证据均已归档。363 项工作区测试通过，最终 Win32 与 Web 包已实机验证。
 - evidence: 上方 E1–E7 证据表
+- remote_head: `50a3c2c7b2dd9644b3d940fc9b72fc06d3859bb4`（`origin/my/main` 发布提交，经 GitHub SSH 读回验证。此记录随后以文档提交追加。）
 - unresolved: 远程节点经回环 SSH 验证，跨主机挂载需按实际部署配置验证。
 - successor_goal: 无
