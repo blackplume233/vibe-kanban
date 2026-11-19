@@ -30,3 +30,7 @@ Chrome 157.0.8103.50 加载正式 NSH Web 包，在同源本地 Rust 服务与�
 由 Win32 包内的 `/api/workspaces/9e5c982c-7510-4145-9e8f-b971fdd7c6d8/pull-requests` 提交隔离的沙箱工作树。HTTP 200 返回草稿 PR #3。GitHub 读回 SHA `217874876122aadc54380c539d1033af0315287d`，与本地 HEAD 一致。SQLite 记录相同的 PR URL。Windows Git 在本轮使用 OpenSSL、HTTP/1.1 及覆盖新分支的 `origin` fetch refspec，GitHub API 使用进程内凭据。
 
 [沙箱草稿 PR #3](https://github.com/blackplume233/vibe-own-sandbox/pull/3)
+
+## Web 键盘提交草稿
+
+Chrome 加载集成构建的 NSH Web，由真实键盘事件搜索并打开沙箱工作区、开启草稿并按 Enter 提交。GitHub 沙箱返回 PR #4，读回的草稿状态、分支和提交 `3990efba74815c93235c1adea6b515beadc45940` 均匹配工作树。SQLite 记录对应的 PR URL。[提交前截图](product-keyboard-submit.png) · [录像](product-keyboard-submit.webm) · [沙箱草稿 PR #4](https://github.com/blackplume233/vibe-own-sandbox/pull/4)

@@ -16,7 +16,7 @@
 | M1 NSH Spike | verified | 锁定 nightly 构建的 Win32 与 Chrome 通过真实服务 HTTP、日志追加与 diff。Win32 `frame` p95 为 5.77 ms。 |
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
-| M4 Linear 交互 | in-progress | Win32 拖放已落库，Chromium 键盘流程覆盖 Agent、真实 diff 和 PR 表单。联网键盘提交遇到 Git TLS 错误。 |
+| M4 Linear 交互 | verified | Win32 拖放已落库，Chromium 键盘流程覆盖 Agent、日志、diff 和联网草稿 PR #4。 |
 | M5 GitHub 联动 | verified | 私有沙箱通过 Issue 往返、Codex 修复与推送、产品读回绿色检查，以及 Claude 文本模式自动续接。 |
 | M6 ACP 管理 | verified | 实际 ACP 用量、持久队列、MCP、Claude/Codex 会话续接有证据。受信节点通过 Windows 协议测试与 Ubuntu 回环 SSH 验收。 |
 | M7 对等与退役 | in-progress | NSH 默认入口和 sunset 页面移除已合入 `my/main`。历史导出路由的类型检查通过，正在复验发布包。 |
