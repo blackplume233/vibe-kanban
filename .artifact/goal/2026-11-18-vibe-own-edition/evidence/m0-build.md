@@ -47,3 +47,7 @@ npm_config_script_shell="$(cygpath -w "$(type -P bash)")" pnpm run check
 - 合入 Windows lint 修复与本地议题底座后，锁定 nightly 的公开工作区严格 Clippy 退出 101。诊断位于 `crates/services/src/services/analytics.rs`，详见本机 `F:/vk-targets/main/m0-m2-nightly-clippy.log`。完整根检查仍需处理 `crates/remote` 的私有 `billing` 依赖。
 - 合入 Windows `analytics.rs` 修复后，`cargo clippy --locked --workspace --all-targets --features qa-mode -- -D warnings` 退出 0，日志为本机 `F:/vk-targets/main/m0-m2-nightly-clippy-after.log`。
 - 锁定 nightly 的 M2 集成测试通过 `db` 8 项和 `server` 24 项。类型生成初次校验只因 Windows 检出换行失败。临时目录生成的所有文件逐字节等于仓库 LF 内容。合入 LF 检出规则后重建已有检出的生成文件，`generate_types --check` 退出 0。
+
+## loop-006 集成工作区
+
+- 在 `90d4f723bcd956b3bbb35b7dc1841f522bea4c4f` 的独立工作树，加载 `harness/env.sh` 后执行锁定 nightly 的 `cargo test --locked --workspace`。退出 `0`，64 个测试目标合计 340 项通过、4 项忽略。原始日志位于 `F:/vk-targets/main/e1-integrated-workspace-tests.log`。E1 在正式包与默认入口切换后复跑。
