@@ -1,5 +1,9 @@
 # M6 ACP Agent 管理交付报告
 
+## 已安装适配器联调
+
+使用本机 Claude CLI 的 ACP 适配器完成新建会话、跨进程续接与 MCP 工具发现。Claude prompt 和 Codex 新建会话遇到认证错误。锁定注册表的适配器版本仍需通过产品入口使用授权身份验收。见 [实测结果与复跑命令](../evidence/m6-real-adapters.md)。
+
 分支 `my/m6` 的实现提交为 `02e3c0e902ae1b7c381171a134b285bcc1a159a4`。本报告与验收记录位于其后的文档提交。
 
 ## 改动

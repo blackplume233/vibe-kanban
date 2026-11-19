@@ -18,7 +18,7 @@
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
 | M4 Linear 交互 | in-progress | 已合入动作、搜索、议题 API 与看板状态。双端操作界面开发中。 |
 | M5 GitHub 联动 | in-progress | PR 与 Issue 同步后端及 M6 队列接线已合入 `efe17674f`，正在复验。测试仓库已验证 Issue 往返、review 草稿与失败检查派发。Agent 推送和转绿待验证。 |
-| M6 ACP 管理 | in-progress | SDK 升级、Claude/Codex ACP 选项和 LF 修复已合入。正在复验后端与实际适配器。 |
+| M6 ACP 管理 | in-progress | SDK 升级和 Claude/Codex ACP 选项已合入。Claude 已验证跨进程续接和 MCP 发现。Claude prompt 与 Codex 新建会话遇到认证错误。 |
 | M7 对等与退役 | in-progress | 已实测独立分支的双端 CLI 包及 ConPTY。继续验证数据目录隔离、主题接入及终端退出，退役依赖 M4–M6 和本地操作对等。 |
 
 ## Run
@@ -44,3 +44,4 @@
 
 - M0 完整 `pnpm run check` 需要读取 `BloopAI/vibe-kanban-private` 的锁定提交 `020091913ce5608d6c8bdb667d124fd22ab10561`。推荐由用户确认具备该仓库只读权限的 SSH 身份，或在不删除 `crates/remote` 的前提下决定该私有依赖的处理方案。
 - E5 测试凭据可写提交状态，写入 Actions 工作流返回 404。可用外部 CI 实际运行同一 PR 提交上的测试并上报，若需 GitHub Actions 托管执行则补充 sandbox 的 workflow 写权限。
+- Claude ACP 的 `session/prompt` 和 Codex ACP 的 `session/new` 在隔离验收中返回认证错误 `-32000`。使用已登录且允许验收的测试身份后复跑两个适配器。详见 `../evidence/m6-real-adapters.md`。
