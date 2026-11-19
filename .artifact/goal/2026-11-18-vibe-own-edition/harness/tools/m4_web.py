@@ -1,6 +1,6 @@
 """使用 Playwright 操作 M4 WASM 界面并记录 Chromium 的实际议题列表滚动。"""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from functools import partial
 from http.client import HTTPConnection
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -354,10 +354,13 @@ def benchmark(page, url, first, shot, out, write_json):
 def capture(args, backend, fixture, api, write_json):
     read_api = partial(api, backend)
     out = args.out
-    with ((out / "web-proxy.log").open("w", encoding="utf-8") as proxy_log,
-          (out / "web-steps.log").open("w", encoding="utf-8") as step_log,
-          site_server(args.site, args.web_port, backend, proxy_log) as url,
-          sync_playwright() as playwright):
+    with ExitStack() as stack:
+        proxy_log = stack.enter_context((out / "web-proxy.log").open("w", encoding="utf-8"))
+        step_log = stack.enter_context((out / "web-steps.log").open("w", encoding="utf-8"))
+        url = backend if args.same_origin else stack.enter_context(
+            site_server(args.site, args.web_port, backend, proxy_log)
+        )
+        playwright = stack.enter_context(sync_playwright())
         with playwright.chromium.launch(channel=args.channel, headless=True) as browser:
             errors = []
 

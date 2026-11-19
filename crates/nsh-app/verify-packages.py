@@ -1,6 +1,6 @@
 """Verify the generated Windows runner and Web site against one real, isolated API.
 
-Requires Chrome, Python playwright/psutil/pywin32/Pillow, Node and the local-web
+Requires Chrome, Python playwright/psutil/pywin32/pywinauto/Pillow, Node and the local-web
 Vite installation. Run with --help for paths. Output includes screenshots and
 Windows application logs. The isolated fixture remains in the evidence directory.
 """
@@ -28,6 +28,7 @@ import win32process
 import win32ui
 from PIL import Image
 from playwright.sync_api import expect, sync_playwright
+from pywinauto import Desktop
 
 
 WORKSPACE = "M7 packaged workspace"
@@ -60,7 +61,7 @@ def until(check, description, timeout=30):
 def api(base, path, method="GET", payload=None):
     data = None if payload is None else json.dumps(payload).encode()
     request = Request(base + "/api" + path, data, {"Content-Type": "application/json"}, method=method)
-    with urlopen(request, timeout=5) as response:
+    with urlopen(request, timeout=25) as response:
         result = json.load(response)
         assert result["success"], result
         print(f"HTTP {response.status} {method} {path}", flush=True)
@@ -140,6 +141,24 @@ def live_runner(process):
     return None
 
 
+def open_native_changes(hwnd):
+    window = Desktop(backend="uia").window(handle=hwnd)
+
+    def click(title, control_type=None):
+        control = window.child_window(title=title, control_type=control_type)
+        control.wait("visible enabled", timeout=15)
+        center = control.rectangle().mid_point()
+        x, y = win32gui.ScreenToClient(hwnd, (center.x, center.y))
+        point = ((y & 0xFFFF) << 16) | (x & 0xFFFF)
+        win32gui.SendMessage(hwnd, 0x0201, 1, point)  # WM_LBUTTONDOWN
+        win32gui.SendMessage(hwnd, 0x0202, 0, point)  # WM_LBUTTONUP
+
+    click("工作区", "Button")
+    click("工作区", "ComboBox")
+    click(WORKSPACE, "ListItem")
+    click("日志与变更", "Button")
+
+
 def close_window(process, hwnd, base):
     win32gui.PostMessage(hwnd, 0x0010, 0, 0)  # WM_CLOSE
     assert process.wait(timeout=15) == 0, process.returncode
@@ -202,10 +221,13 @@ def browser_smoke(args, base, workspace, execution):
             page.goto(origin)
             page.wait_for_load_state("networkidle")
             expect(page).to_have_title("vibe-own")
-            page.get_by_text(WORKSPACE, exact=True).first.click(timeout=15_000)
+            page.get_by_role("button", name="工作区", exact=True).first.click(timeout=15_000)
+            page.get_by_text("选择工作区", exact=True).click()
+            page.get_by_text(WORKSPACE, exact=True).click()
+            page.get_by_role("button", name="日志与变更", exact=True).click()
             expect(page.get_by_text(re.compile(r"(?:^|/)review\.txt$")).first).to_be_visible(timeout=15_000)
             expect(page.get_by_text("status=packaged", exact=False)).to_be_visible()
-            expect(page.get_by_text(re.compile(r"^[1-9]\d* entries$")).first).to_be_visible()
+            expect(page.get_by_text(re.compile(r"M7 live tick \d{3}")).first).to_be_visible()
             ws = origin.replace("http", "ws", 1)
             required = {f"{ws}/api/workspaces/{workspace}/git/diff/ws",
                         f"{ws}/api/execution-processes/stream/session/ws?session_id=",
@@ -256,10 +278,7 @@ def main():
                 return fragment in log.read_text(encoding="utf-8", errors="replace")
 
             until(lambda: logged("HTTP 200 /api/workspaces"), "Win32 workspaces HTTP request")
-            dpi = ctypes.windll.user32.GetDpiForWindow(hwnd) / 96
-            point = (round(115 * dpi) << 16) | round(90 * dpi)
-            win32gui.SendMessage(hwnd, 0x0201, 1, point)  # WM_LBUTTONDOWN
-            win32gui.SendMessage(hwnd, 0x0202, 0, point)  # WM_LBUTTONUP
+            open_native_changes(hwnd)
             until(lambda: logged(f"diff {workspace}: 1 changed files"), "Win32 real diff stream")
             until(lambda: logged(f"execution {execution}: 1 live log entries"), "Win32 real log stream")
             try:

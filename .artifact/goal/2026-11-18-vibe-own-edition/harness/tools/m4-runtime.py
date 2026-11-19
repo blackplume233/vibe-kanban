@@ -1,13 +1,10 @@
 """运行已构建的 M4 原生或 Web Release 前端，使用独立的本地 SQLite。
 
-从仓库根目录启动。--server 应指向本工作树构建的 debug server.exe，
-或指向为 utils 打开 debug-assertions 的 release server.exe。两者使用
-编译时工作树的 dev_assets。脚本独占该目录，退出时删除本次夹具。
-Windows 的发行版服务器经由 Known Folder API 定位用户数据，APPDATA
-环境变量不能重定向该路径。不要给此脚本传入普通发行版服务器。
+从仓库根目录启动。--server 应指向支持 VK_ASSET_DIR 的 standalone server。
+脚本将 SQLite 写入本次证据目录中的 data/。
 
-Build once (optional release backend; the M1 debug server is also supported):
-  cargo --config 'profile.release.package.utils.debug-assertions=true' build --release --locked --bin server
+Build once:
+  cargo build --locked --bin server
 Browser prerequisite:
   python -m pip install playwright
   python -m playwright install chromium
@@ -20,18 +17,19 @@ Usage (PowerShell, from the worktree):
 原生测量须在可见、未锁屏的桌面会话中运行。两次运行分别重建 SQLite。
 冷启动测量从新原生进程或新 Chromium 上下文的导航开始，夹具服务器已就绪。
 原生以首次真实列表滚动为终点，Web 以键盘打开首条议题后的绘制机会为终点。
+原生 --packaged 在准备夹具后关闭 standalone server，再启动包内后端并计时。
+原生 --cold-runs 9 使用事件通知分段计时。每次启动新的 UI 进程，等首批议题可见后发送一次滚轮，采样前后核对编译进程。
 --enforce-budgets 检查原生 1000 ms、Web 2000 ms 和原生帧时间 p95 16 ms。
 Web rAF 受刷新率约束，脚本记录原始间隔和独立 Chromium 渲染 trace。
 """
 
 import argparse
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 import json
 from mmap import ACCESS_READ, mmap
 import os
 from pathlib import Path
 import re
-import shutil
 import socket
 import sqlite3
 import subprocess
@@ -93,6 +91,9 @@ def server(args, assets, log_path):
         VK_ALLOWED_ORIGINS=f"http://127.0.0.1:{args.web_port}", TMP=str(temp), TEMP=str(temp),
         TMPDIR=str(temp), RUST_LOG="info", NO_COLOR="1",
     )
+    env["VK_ASSET_DIR"] = str(assets)
+    if args.same_origin:
+        env["VK_WEB_ROOT"] = str(args.site)
     env.pop("VK_SHARED_API_BASE", None)
     backend = f"http://127.0.0.1:{args.backend_port}"
     with log_path.open("wb") as log:
@@ -109,7 +110,7 @@ def server(args, assets, log_path):
                     sleep(0.05)
             database = assets / "db.v2.sqlite"
             require(process.poll() is None and database.is_file(),
-                    f"服务器未使用隔离数据库 {database}，请用本工作树的夹具服务器。见 {log_path}")
+                    f"服务器未使用 VK_ASSET_DIR 指定的数据库 {database}。见 {log_path}")
             yield backend, env, database
         finally:
             if process.poll() is None:
@@ -204,16 +205,12 @@ def native(args, out, env, fixture):
 
 
 def uses_fixture_assets(executable):
-    # Windows derives the standard release database from the user's Known Folder.
-    utils_root = REPO / "crates" / "utils"
-    paths = {str(utils_root), utils_root.as_posix()}
+    # Refuse old servers that could otherwise open the user's default database.
     with executable.open("rb") as file:
         if not executable.stat().st_size:
             return False
         with mmap(file.fileno(), 0, access=ACCESS_READ) as image:
-            return image.find(b"../../dev_assets") >= 0 and any(
-                image.find(path.encode("utf-8")) >= 0 for path in paths
-            )
+            return image.find(b"VK_ASSET_DIR") >= 0
 
 
 def main():
@@ -226,6 +223,9 @@ def main():
     parser.add_argument("--backend-port", type=int, default=59401)
     parser.add_argument("--web-port", type=int, default=59402)
     parser.add_argument("--channel", help="Chrome/Edge Playwright channel；默认为 Playwright Chromium")
+    parser.add_argument("--cold-runs", type=int, default=0, help="Win32 分段测量次数，使用同一 SQLite 夹具")
+    parser.add_argument("--packaged", action="store_true", help="Win32 正式包内嵌服务，计时包含后端启动")
+    parser.add_argument("--same-origin", action="store_true", help="由 standalone server 同源托管 Web 包")
     parser.add_argument("--enforce-budgets", action="store_true", help="测量超预算时返回失败并保留证据")
     args = parser.parse_args()
     for name in ("server", "native", "site", "out"):
@@ -233,37 +233,46 @@ def main():
         if path is not None:
             setattr(args, name, path.resolve())
     if not args.server.is_file() or not uses_fixture_assets(args.server):
-        parser.error("--server 应使用本工作树的 dev_assets，见 --help 中的编译说明")
+        parser.error("--server 应支持 VK_ASSET_DIR，见 --help 中的编译说明")
     if args.mode == "windows" and (os.name != "nt" or not args.native or not args.native.is_file()):
         parser.error("windows 模式需要 Windows 和 --native Release 可执行文件")
     if args.mode == "web" and (not args.site or not (args.site / "index.html").is_file()):
         parser.error("web 模式需要 --site 指向已构建的站点目录")
+    if args.cold_runs < 0 or (args.cold_runs and args.mode != "windows"):
+        parser.error("--cold-runs 仅用于 windows，必须为非负整数")
+    if args.packaged and (args.mode != "windows" or not (args.native.parent / "nsh/app.json").is_file()):
+        parser.error("--packaged 需要保留 exe 旁边的 nsh/ 目录")
+    if args.same_origin and args.mode != "web":
+        parser.error("--same-origin 仅用于 web")
     if not all(1 <= port <= 65535 for port in (args.backend_port, args.web_port)) or args.backend_port == args.web_port:
         parser.error("两端口必须不同，范围 1–65535")
-    assets = REPO / "dev_assets"
-    if args.out.is_relative_to(assets):
-        parser.error("--out 必须位于 dev_assets 之外")
     port_is_free(args.backend_port)
-    if args.mode == "web":
+    if args.mode == "web" and not args.same_origin:
         port_is_free(args.web_port)
     args.out.mkdir(parents=True, exist_ok=False)
-    try:
-        assets.mkdir(exist_ok=False)
-    except FileExistsError:
-        parser.error(f"隔离需要不存在的目录 {assets}，请使用干净的夹具工作树")
-    try:
-        with server(args, assets, args.out / "server.log") as (backend, env, database):
-            fixture = seed(backend, database)
-            write_json(args.out / "fixture.json", fixture)
-            print(f"SQLite 已校验 {fixture['total_issues']} 条议题，证据目录 {args.out}", flush=True)
-            if args.mode == "web":
-                sys.dont_write_bytecode = True
-                from m4_web import capture
-                results = capture(args, backend, fixture, api, write_json)
-            else:
-                results = native(args, args.out, env, fixture)
-    finally:
-        shutil.rmtree(assets)
+    with ExitStack() as processes:
+        backend, env, database = processes.enter_context(
+            server(args, args.out / "data", args.out / "server.log")
+        )
+        fixture = seed(backend, database)
+        write_json(args.out / "fixture.json", fixture)
+        print(f"SQLite 已校验 {fixture['total_issues']} 条议题，证据目录 {args.out}", flush=True)
+        if args.packaged:
+            processes.close()
+            env.pop("BACKEND_PORT", None)
+            env["NSH_APP_DIR"] = str(args.native.parent / "nsh")
+            env["VK_NSH_BENCHMARK"] = "1"
+        if args.mode == "web":
+            sys.dont_write_bytecode = True
+            from m4_web import capture
+            results = capture(args, backend, fixture, api, write_json)
+        elif args.cold_runs:
+            sys.dont_write_bytecode = True
+            from m4_cold import capture
+            results = capture(args, args.out, env, fixture)
+            write_json(args.out / "native-cold-stages.json", results)
+        else:
+            results = native(args, args.out, env, fixture)
     print(json.dumps(results["budgets"], ensure_ascii=False), flush=True)
     if args.enforce_budgets and not all(results["budgets"].values()):
         sys.exit("M4 超出性能预算，详见证据目录。")
