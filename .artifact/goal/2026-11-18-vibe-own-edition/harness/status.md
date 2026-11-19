@@ -19,11 +19,11 @@
 | M4 Linear 交互 | in-progress | 已合入动作、搜索、议题 API 与看板状态。双端操作界面开发中。 |
 | M5 GitHub 联动 | in-progress | `efe17674f` 的 73 项测试和类型生成检查通过。NSH 面板已合入待接线。测试仓库上的 Agent 推送、CI 转绿和 review 自动派发待验收。 |
 | M6 ACP 管理 | in-progress | SDK 升级和 Claude/Codex ACP 选项已合入。Claude 已验证跨进程续接和 MCP 发现。Claude prompt 与 Codex 新建会话遇到认证错误。 |
-| M7 对等与退役 | in-progress | 已实测独立分支的双端 CLI 包及 ConPTY。继续验证数据目录隔离、主题接入及终端退出，退役依赖 M4–M6 和本地操作对等。 |
+| M7 对等与退役 | in-progress | 终端已合入 `559999fdc`。两端在真实 ConPTY 上验证交互和自然退出。Win32 验证脚本清理超时，待复验。主题包和生命周期等待集成。 |
 
 ## Run
 
-- 当前 loop 为 `loop-007`。M1–M3 已验收。ACP 升级已合入 `4cb6f061c`，正在从独立检出复验。
+- 当前 loop 为 `loop-007`。M1–M3 已验收。M5 与 M6 后端已通过集成测试，NSH 组件按独立切片合入。
 
 ## Gate
 
