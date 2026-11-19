@@ -199,8 +199,10 @@ pub(super) struct McpConfig {
     preconfigured: BTreeMap<String, Value>,
 }
 
+type McpEditorParts = (String, Vec<String>, BTreeMap<String, Value>);
+
 impl McpConfig {
-    pub fn editor(self) -> Result<(String, Vec<String>, BTreeMap<String, Value>), String> {
+    pub fn editor(self) -> Result<McpEditorParts, String> {
         let (key, parents) = self
             .servers_path
             .split_last()

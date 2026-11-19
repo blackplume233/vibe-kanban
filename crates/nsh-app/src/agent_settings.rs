@@ -64,7 +64,6 @@ struct Confirmation {
 struct Panel {
     owner: Owner,
     api: Api,
-    notify_profiles: Rc<dyn Fn()>,
     screen: Signal<Screen>,
     selection: Signal<Option<Preset>>,
     profiles: Signal<Option<Profiles>>,
@@ -79,15 +78,10 @@ struct Panel {
     filter: Signal<String>,
 }
 
-/// Mount once in the settings view. The callback invalidates external profile pickers.
-pub(crate) fn agent_settings(
-    api: Api,
-    on_profiles_changed: impl Fn() + 'static,
-) -> impl IntoElement {
+pub(crate) fn agent_settings(api: Api) -> impl IntoElement {
     let panel = Panel {
         owner: Owner::current(),
         api,
-        notify_profiles: Rc::new(on_profiles_changed),
         screen: signal(Screen::Registry),
         selection: signal(None),
         profiles: signal(None),
@@ -225,7 +219,6 @@ impl Panel {
                 install,
             } => {
                 data::set_installed(&self.api, &id, install).await?;
-                (self.notify_profiles)();
                 self.agents.update(|agents| {
                     if let Some(agent) = agents.iter_mut().find(|agent| agent.id == id) {
                         agent.installed = install;
@@ -250,7 +243,6 @@ impl Panel {
             Operation::Preset(target, change) => {
                 let deleted = matches!(change, ProfileChange::Delete { .. });
                 data::save_profile(&self.api, &target, change).await?;
-                (self.notify_profiles)();
                 let next = if deleted {
                     Preset {
                         executor: target.executor,

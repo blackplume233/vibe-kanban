@@ -110,8 +110,9 @@ struct Ui {
     views: Signal<Vec<SavedView>>,
     inventory: Signal<Vec<Issue>>,
     workspaces: Signal<Vec<Workspace>>,
-    workspace_id: Signal<Option<Id>>,
+    workspace_id: Signal<Option<String>>,
     workspace_screen: Signal<bool>,
+    shortcuts_active: Box<dyn Fn() -> bool>,
     status: Signal<Id>,
     connected: Signal<bool>,
     reload: Signal<u32>,
@@ -151,9 +152,11 @@ pub(crate) fn control(label: impl Into<Id>, press: impl Fn() + 'static) -> View 
 pub(crate) fn board_view(
     api: Api,
     workspaces: Signal<Vec<Workspace>>,
-    workspace_id: Signal<Option<Id>>,
+    workspace_id: Signal<Option<String>>,
     selected_issue: Signal<Option<Id>>,
     workspace_screen: Signal<bool>,
+    command_open: Signal<bool>,
+    shortcuts_active: impl Fn() -> bool + 'static,
 ) -> impl IntoElement {
     let ui = Rc::new(Ui {
         api,
@@ -167,6 +170,7 @@ pub(crate) fn board_view(
         workspaces,
         workspace_id,
         workspace_screen,
+        shortcuts_active: Box::new(shortcuts_active),
         status: signal("正在连接本地服务".into()),
         connected: signal(false),
         reload: signal(0),
@@ -194,6 +198,10 @@ pub(crate) fn board_view(
     effect({
         let ui = ui.clone();
         move || ui.clone().load_project()
+    });
+    effect({
+        let ui = ui.clone();
+        move || command_open.set(ui.modal.with(Option::is_some))
     });
     register_keys(ui.clone());
     view()
@@ -396,7 +404,7 @@ impl Ui {
                     self.choose_project(project.0.to_owned().into(), None)
                 }
                 Action::OpenEntity(EntityId::Workspace(workspace)) => {
-                    self.workspace_id.set(Some(workspace.0.to_owned().into()));
+                    self.workspace_id.set(Some(workspace.0.to_owned()));
                     self.workspace_screen.set(true);
                 }
                 Action::StartWorkspace(issue) => self.launch_workspace(issue),
@@ -572,7 +580,7 @@ fn register_keys(ui: Rc<Ui>) {
         {
             let ui = ui.clone();
             move |_| {
-                if ui.modal.get_untracked().is_none() {
+                if (ui.shortcuts_active)() && ui.modal.get_untracked().is_none() {
                     ui.invoke(Action::OpenCommand, ActionSource::Keyboard);
                 }
             }
@@ -902,6 +910,7 @@ fn surface(ui: Rc<Ui>) -> impl IntoElement {
 }
 
 fn rail(ui: Rc<Ui>) -> impl IntoElement {
+    let syncing = signal(false);
     view()
         .w(px(208.0))
         .flex_shrink_0()
@@ -931,7 +940,40 @@ fn rail(ui: Rc<Ui>) -> impl IntoElement {
             let ui = ui.clone();
             move || ui.open(Modal::NewProject)
         }))
-        .child(filters(ui, false))
+        .child(control("GitHub Issues", move || {
+            syncing.update(|open| *open = !*open)
+        }))
+        .child(when(syncing, {
+            let ui = ui.clone();
+            move || {
+                scroll().flex_1().min_h(px(0.0)).child(dynamic({
+                    let ui = ui.clone();
+                    move || {
+                        let project_id = ui.project.get()?;
+                        ui.board.with(|board| {
+                            let statuses = board.as_ref()?.statuses();
+                            let reload = ui.reload;
+                            Some(
+                                crate::github_integration::project_issue_sync(
+                                    ui.api.clone(),
+                                    project_id.clone(),
+                                    statuses,
+                                    move |_| {
+                                        reload
+                                            .update(|revision| *revision = revision.wrapping_add(1))
+                                    },
+                                )
+                                .key(project_id),
+                            )
+                        })
+                    }
+                }))
+            }
+        }))
+        .child(when(
+            move || !syncing.get(),
+            move || filters(ui.clone(), false),
+        ))
 }
 
 fn filters(ui: Rc<Ui>, horizontal: bool) -> impl IntoElement {
@@ -1047,7 +1089,7 @@ fn column(ui: Rc<Ui>, status: Id, label: Id) -> View {
     let bounds_ref = element_ref();
     ui.drop_zones
         .borrow_mut()
-        .insert(status.clone(), bounds_ref.clone());
+        .insert(status.clone(), bounds_ref);
     cleanup({
         let ui = ui.clone();
         let status = status.clone();
@@ -1127,12 +1169,9 @@ fn issue_list(ui: Rc<Ui>, column: Option<Id>) -> impl IntoElement {
             if !is_list {
                 effect({
                     let ui = ui.clone();
-                    let card_ref = card_ref.clone();
                     move || {
                         if let Some((id, ..)) = issue.get() {
-                            ui.card_zones
-                                .borrow_mut()
-                                .insert(id.clone(), card_ref.clone());
+                            ui.card_zones.borrow_mut().insert(id.clone(), card_ref);
                             cleanup({
                                 let ui = ui.clone();
                                 move || {
@@ -1215,7 +1254,7 @@ fn issue_list(ui: Rc<Ui>, column: Option<Id>) -> impl IntoElement {
                                     if !event.cancelled
                                         && let Some(id) = id
                                     {
-                                        ui.clone().drop_card(id, grip.clone(), event.translation);
+                                        ui.clone().drop_card(id, grip, event.translation);
                                     }
                                 }
                             })

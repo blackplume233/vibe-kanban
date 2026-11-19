@@ -23,12 +23,6 @@ pub(crate) struct Workspace {
     pub(crate) branch: String,
 }
 
-impl Workspace {
-    pub(crate) fn label(&self) -> &str {
-        self.name.as_deref().unwrap_or(&self.branch)
-    }
-}
-
 #[derive(Deserialize)]
 struct Session {
     id: String,
@@ -157,6 +151,10 @@ impl Api {
             .and_then(|query| query.strip_prefix("?backend_port=")?.parse::<u16>().ok())
             .map_or(ws, |port| format!("ws://127.0.0.1:{port}"));
         Self { http, ws }
+    }
+
+    pub(crate) fn http_origin(&self) -> &str {
+        &self.http
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, String> {
@@ -317,17 +315,16 @@ impl Api {
             let frame = parse_frame(&frame?)?;
             if let Some(patch) = frame.patch {
                 for operation in patch.0 {
-                    if let json_patch::PatchOperation::Add(op) = operation {
-                        if matches!(op.value["type"].as_str(), Some("STDOUT" | "STDERR"))
-                            && let Some(output) = op.value["content"].as_str()
-                        {
-                            lines.update(|lines| {
-                                lines.push(output.trim_end_matches(['\r', '\n']).to_owned().into())
-                            });
-                            let count = lines.with(Vec::len);
-                            if count <= 2 || count.is_multiple_of(10) {
-                                log::info!("execution {id}: {count} live log entries");
-                            }
+                    if let json_patch::PatchOperation::Add(op) = operation
+                        && matches!(op.value["type"].as_str(), Some("STDOUT" | "STDERR"))
+                        && let Some(output) = op.value["content"].as_str()
+                    {
+                        lines.update(|lines| {
+                            lines.push(output.trim_end_matches(['\r', '\n']).to_owned().into())
+                        });
+                        let count = lines.with(Vec::len);
+                        if count <= 2 || count.is_multiple_of(10) {
+                            log::info!("execution {id}: {count} live log entries");
                         }
                     }
                 }

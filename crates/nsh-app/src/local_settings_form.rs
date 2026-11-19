@@ -102,8 +102,7 @@ pub(super) fn input_field(
 }
 
 pub(super) fn choice<Items, Disabled>(
-    id: &'static str,
-    title: &'static str,
+    (id, title): (&'static str, &'static str),
     items: impl IntoProp<Vec<SelectItem>, Items>,
     selected: impl Fn() -> Option<SharedString> + Copy + 'static,
     selected_title: impl Fn() -> SharedString + 'static,
@@ -135,8 +134,7 @@ fn enum_field(
         title,
         "",
         choice(
-            id,
-            title,
+            (id, title),
             options
                 .iter()
                 .map(|&(value, label)| SelectItem::new(value, label))
@@ -198,8 +196,7 @@ fn has_value(draft: Signal<Option<Draft>>, path: &str) -> bool {
 fn optional_field(
     draft: Signal<Option<Draft>>,
     locked: Signal<bool>,
-    path: &'static str,
-    id: &'static str,
+    (path, id): (&'static str, &'static str),
     title: &'static str,
     help: &'static str,
     multiline: bool,
@@ -363,8 +360,7 @@ fn executor_choices(state: State) -> View {
             "默认执行器",
             "用于新建工作区。",
             choice(
-                "settings-executor",
-                "默认执行器",
+                ("settings-executor", "默认执行器"),
                 move || {
                     state.profiles.with(|profiles| {
                         profiles
@@ -399,8 +395,7 @@ fn executor_choices(state: State) -> View {
             "默认配置变体",
             "",
             choice(
-                "settings-variant",
-                "默认配置变体",
+                ("settings-variant", "默认配置变体"),
                 move || {
                     state.profiles.with(|profiles| {
                         let mut items = vec![SelectItem::new("", "默认")];
@@ -471,8 +466,7 @@ pub(super) fn editor_git(state: State) -> View {
                         optional_field(
                             state.product,
                             state.busy,
-                            "/editor/custom_command",
-                            "settings-editor-command",
+                            ("/editor/custom_command", "settings-editor-command"),
                             "启动命令",
                             "由本机后端执行。",
                             false,
@@ -493,8 +487,7 @@ pub(super) fn editor_git(state: State) -> View {
                             .child(optional_field(
                                 state.product,
                                 state.busy,
-                                SSH_HOST,
-                                "settings-editor-ssh-host",
+                                (SSH_HOST, "settings-editor-ssh-host"),
                                 "SSH 主机",
                                 "留空时使用本机编辑器。",
                                 false,
@@ -506,8 +499,7 @@ pub(super) fn editor_git(state: State) -> View {
                                     optional_field(
                                         state.product,
                                         state.busy,
-                                        "/editor/remote_ssh_user",
-                                        "settings-editor-ssh-user",
+                                        ("/editor/remote_ssh_user", "settings-editor-ssh-user"),
                                         "SSH 用户",
                                         "",
                                         false,
@@ -559,8 +551,7 @@ pub(super) fn editor_git(state: State) -> View {
                 .child(optional_field(
                     state.product,
                     state.busy,
-                    WORKSPACE_DIR,
-                    "settings-workspace-dir",
+                    (WORKSPACE_DIR, "settings-workspace-dir"),
                     "工作区目录",
                     "留空时使用后端的默认目录。",
                     false,
@@ -588,8 +579,7 @@ pub(super) fn repos(state: State) -> View {
                     "已注册仓库",
                     "",
                     choice(
-                        "settings-repo-choice",
-                        "已注册仓库",
+                        ("settings-repo-choice", "已注册仓库"),
                         move || {
                             state.repos.with(|repos| {
                                 repos
@@ -675,7 +665,13 @@ pub(super) fn repos(state: State) -> View {
 fn repo_fields(state: State) -> View {
     let opt = move |path, id, title, help, multiline| {
         optional_field(
-            state.repo, state.busy, path, id, title, help, multiline, true,
+            state.repo,
+            state.busy,
+            (path, id),
+            title,
+            help,
+            multiline,
+            true,
         )
     };
     let branch_value = move || string(state.repo, REPO_BRANCH);
@@ -706,8 +702,7 @@ fn repo_fields(state: State) -> View {
                     "默认目标分支",
                     "未选择时使用仓库当前分支。",
                     choice(
-                        "settings-repo-branch",
-                        "默认目标分支",
+                        ("settings-repo-branch", "默认目标分支"),
                         move || {
                             state
                                 .branches

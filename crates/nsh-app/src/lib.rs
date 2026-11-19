@@ -1,14 +1,28 @@
 #[cfg(any(windows, target_arch = "wasm32"))]
+mod agent_conversation;
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod agent_management;
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod agent_settings;
+#[cfg(any(windows, target_arch = "wasm32"))]
 mod api;
 #[cfg(any(windows, target_arch = "wasm32"))]
 mod app;
-#[cfg(windows)]
-mod desktop;
-mod package;
 #[cfg(any(windows, target_arch = "wasm32"))]
 mod board_ui;
+#[cfg(windows)]
+mod desktop;
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod github_integration;
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod local_settings;
+mod package;
 #[cfg(any(windows, target_arch = "wasm32"))]
 mod socket;
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod terminal;
+#[cfg(any(windows, target_arch = "wasm32"))]
+mod workspace_lifecycle;
 
 pub mod board_state;
 pub mod command_search;

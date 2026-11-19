@@ -352,7 +352,7 @@ impl Form {
                 .await
             {
                 Ok(StartedWorkspace { workspace }) => {
-                    let id = Id::from(workspace.id.clone());
+                    let id = workspace.id.clone();
                     batch(|| {
                         ui.workspaces.update(|rows| {
                             if let Some(row) = rows.iter_mut().find(|row| row.id == workspace.id) {

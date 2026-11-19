@@ -991,7 +991,7 @@ fn git_form(api: Rc<Api>, state: State) -> impl IntoElement {
             text(move || {
                 state
                     .git_form
-                    .with(|form| match form.as_ref().map(|form| form.kind.clone()) {
+                    .with(|form| match form.as_ref().map(|form| form.kind) {
                         Some(GitFormKind::Rebase) => "确认 Rebase",
                         Some(GitFormKind::Target) => "更改目标分支",
                         Some(GitFormKind::PullRequest) => "创建 Pull Request",
@@ -1103,14 +1103,14 @@ fn git_form(api: Rc<Api>, state: State) -> impl IntoElement {
                 .child(
                     action(
                         move || {
-                            state.git_form.with(|form| {
-                                match form.as_ref().map(|form| form.kind.clone()) {
+                            state
+                                .git_form
+                                .with(|form| match form.as_ref().map(|form| form.kind) {
                                     Some(GitFormKind::Rebase) => "执行 Rebase",
                                     Some(GitFormKind::Target) => "保存目标分支",
                                     Some(GitFormKind::PullRequest) => "推送并创建 PR",
                                     None => "确认",
-                                }
-                            })
+                                })
                         },
                         true,
                     )

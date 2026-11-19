@@ -19,7 +19,7 @@ pub fn PackagedApp() -> impl IntoElement {
     }
 
     #[cfg(any(windows, target_arch = "wasm32"))]
-    return crate::App::element(Default::default()).into_element();
+    return crate::App::element(()).into_element();
 
     #[cfg(not(any(windows, target_arch = "wasm32")))]
     text("vibe-own supports Windows and Web").into_element()
