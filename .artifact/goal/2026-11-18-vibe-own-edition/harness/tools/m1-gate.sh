@@ -31,7 +31,7 @@ if [[ $mode != web ]]; then
     run_logged "$target/nsh-native-build.log" cargo "+$toolchain" build --locked --release --manifest-path "$manifest"
 fi
 if [[ $mode != windows ]]; then
-    run_logged "$target/nsh-web-build.log" cargo "+$toolchain" build --locked --release --lib --target wasm32-unknown-unknown --manifest-path "$manifest"
+    run_logged "$target/nsh-web-build.log" cargo "+$toolchain" build --locked --release --lib --features m1-web-smoke --target wasm32-unknown-unknown --manifest-path "$manifest"
     bindgen=${NSH_WASM_BINDGEN:-"$target/tools/bin/wasm-bindgen.exe"}
     if [[ ! -x $bindgen ]]; then
         run_logged "$target/bindgen-build.log" cargo "+$toolchain" install wasm-bindgen-cli --version 0.2.129 --locked --root "$target/tools"

@@ -214,6 +214,8 @@ function generate(check) {
     },
   };
   for (const preset of presets) outputs[`theme-${preset}.generated.json`] = projectTheme(tokens, preset);
+  const packageConfig = parseJson(readFileSync(new URL('../nsh.json', import.meta.url), 'utf8'));
+  outputs['../nsh.json'] = { ...packageConfig, ...outputs['tailwind.generated.json'] };
 
   const stale = [];
   for (const [name, projection] of Object.entries(outputs)) {

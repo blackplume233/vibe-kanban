@@ -127,10 +127,18 @@ type Files = Vec<(String, Rc<Diff>)>;
 impl Api {
     #[cfg(windows)]
     pub fn local() -> Self {
+        if let Some(port) = use_context::<crate::desktop::BackendPort>() {
+            return Self::loopback(port.0);
+        }
         let port = std::env::var("BACKEND_PORT")
             .ok()
             .and_then(|port| port.parse::<u16>().ok())
             .unwrap_or(59301);
+        Self::loopback(port)
+    }
+
+    #[cfg(windows)]
+    fn loopback(port: u16) -> Self {
         Self {
             http: format!("http://127.0.0.1:{port}"),
             ws: format!("ws://127.0.0.1:{port}"),
@@ -141,16 +149,13 @@ impl Api {
     pub fn local() -> Self {
         let location = web_sys::window().expect("browser window").location();
         let http = location.origin().expect("browser origin");
-        // The smoke site proxies read-only HTTP paths. Its WS connects directly
-        // to the backend so the server's real Origin check is exercised.
-        let backend_port = location
+        let ws = http.replacen("http", "ws", 1);
+        #[cfg(feature = "m1-web-smoke")]
+        let ws = location
             .search()
             .ok()
-            .and_then(|query| query.strip_prefix("?backend_port=")?.parse::<u16>().ok());
-        let ws = match backend_port {
-            Some(port) => format!("ws://127.0.0.1:{port}"),
-            None => http.replacen("http", "ws", 1),
-        };
+            .and_then(|query| query.strip_prefix("?backend_port=")?.parse::<u16>().ok())
+            .map_or(ws, |port| format!("ws://127.0.0.1:{port}"));
         Self { http, ws }
     }
 
