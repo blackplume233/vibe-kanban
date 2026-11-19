@@ -26,22 +26,21 @@ For remote/cloud types, regenerate using `pnpm run remote:generate-types`
 Do not manually edit shared/remote-types.ts, instead edit crates/remote/src/bin/remote-generate-types.rs (see crates/remote/AGENTS.md for details).
 
 ## Build, Test, and Development Commands
-- Install: `pnpm i`
-- Run dev (web app + backend with ports auto-assigned): `pnpm run dev`
-- Backend (watch): `pnpm run backend:dev:watch`
-- Web app (dev): `pnpm run local-web:dev`
-- Type checks: `pnpm run check` (frontend + all backend Rust workspaces) and `pnpm run backend:check` (all backend Rust workspaces, including `crates/remote`)
-- Rust tests: `cargo test --workspace`
-- Generate TS types from Rust: `pnpm run generate-types` (or `generate-types:check` in CI)
+- Bootstrap the pinned NSH CLI: `pnpm run nsh:install` then `pnpm run nsh:install-web` for the Web target (LLVM required).
+- Dev (NSH Web and same-origin local API): `pnpm run dev`.
+- Dev (Windows x64, in-process local server): `pnpm run dev:windows`.
+- Backend only: `pnpm run backend:dev`.
+- Checks: `pnpm run check` (root Rust workspace and NSH app); `pnpm run backend:check` for the root Cargo workspace.
+- Rust tests: `cargo test --locked --workspace`.
+- Shared types: `pnpm run generate-types` (or `generate-types:check` in CI).
 - Prepare SQLx (offline): `pnpm run prepare-db`
-- Prepare SQLx (remote package, postgres): `pnpm run remote:prepare-db`
-- Local NPX build: `pnpm run build:npx` then `pnpm pack` in `npx-cli/`
-- Release (npx, without CI): `scripts/release-local.sh`; see [`RELEASING.md`](RELEASING.md)
-- Format code: `pnpm run format` (runs `cargo fmt` for all backend Rust workspaces + web-core/web Prettier)
-- Lint: `pnpm run lint` (runs web/ui ESLint + `cargo clippy` for all backend Rust workspaces)
+- Build packages: `pnpm run build:web`, `pnpm run build:windows`, or `pnpm run build:npx`; see [RELEASING.md](RELEASING.md).
+- Format: `pnpm run format` (root Rust workspace and the NSH app).
+- Lint: `pnpm run lint` (Clippy for the root Rust workspace and the NSH app).
+- Historical remote build and SQLx commands are explicit; they require private Cargo access.
 
 ## Before Completing a Task
-- Run `pnpm run format` to format all Rust workspaces and web code.
+- Run the appropriate formatting and check commands for the files you edit.
 
 ## Coding Style & Naming Conventions
 - Rust: `rustfmt` enforced (`rustfmt.toml`); group imports by crate; snake_case modules, PascalCase types.

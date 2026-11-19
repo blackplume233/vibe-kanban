@@ -10,7 +10,7 @@ import {
   buildKanbanIssueComposerKey,
   closeKanbanIssueComposer,
 } from '@/shared/stores/useKanbanIssueComposerStore';
-import { ProjectSunsetPage } from './ProjectSunsetPage';
+import { useAppNavigation } from '@/shared/hooks/useAppNavigation';
 
 /**
  * Hook to find a project by ID, using orgId from Zustand store
@@ -33,27 +33,13 @@ function useFindProjectById(projectId: string | undefined) {
   }, [projectId, projects]);
 
   return {
-    project,
     organizationId: project?.organization_id ?? selectedOrgId,
     // Include auth loading state - we can't determine project access until auth loads
     isLoading: !authLoaded || orgsLoading || projectsLoading,
   };
 }
 
-/**
- * ProjectKanban page - displays the Kanban board for a specific project
- *
- * URL patterns:
- * - /projects/:projectId - Kanban board with no issue selected
- * - /projects/:projectId/issues/:issueId - Kanban with issue panel open
- * - /projects/:projectId/issues/:issueId/workspaces/:workspaceId - Kanban with workspace session panel open
- * - /projects/:projectId/issues/:issueId/workspaces/create/:draftId - Kanban with workspace create panel
- *
- * Note: issue creation is composer-store state on top of /projects/:projectId.
- *
- * Note: This component is rendered inside SharedAppLayout which provides
- * NavbarContainer, AppBar, and SyncErrorProvider.
- */
+/** Redirect legacy project links to the data export page. */
 export function ProjectKanban() {
   const { projectId, hostId } = useCurrentKanbanRouteState();
   const { t } = useTranslation('common');
@@ -75,10 +61,14 @@ export function ProjectKanban() {
     previousIssueComposerKeyRef.current = issueComposerKey;
   }, [issueComposerKey]);
 
-  // Find the project and get its organization
-  const { project, organizationId, isLoading } = useFindProjectById(
+  const { organizationId, isLoading } = useFindProjectById(
     projectId ?? undefined
   );
+  const appNavigation = useAppNavigation();
+  const canExport = authLoaded && !isLoading && isSignedIn && !!projectId && !!organizationId;
+  useEffect(() => {
+    if (canExport) appNavigation.goToExport({ replace: true });
+  }, [appNavigation, canExport]);
 
   // Show loading while auth state is being determined
   if (!authLoaded || isLoading) {
@@ -111,5 +101,5 @@ export function ProjectKanban() {
     );
   }
 
-  return <ProjectSunsetPage projectName={project?.name} />;
+  return null;
 }

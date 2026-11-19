@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
-    process::Command,
+    process::{Child, Command},
     sync::{mpsc, mpsc::UnboundedSender},
 };
 use tokio_util::{compat::TokioAsyncReadCompatExt, sync::CancellationToken};
@@ -47,6 +47,7 @@ use crate::{
                 ConfigSink, ConfigValue, DesiredConfig, SessionOptions, Setter, apply_config,
                 describe_changes, set_value, summary,
             },
+            trusted_node::{self, RemoteSession},
         },
     },
     logs::ExecutionTokenUsage,
@@ -92,10 +93,23 @@ struct SessionShared {
     /// Set once our own config is applied. Before that, config notifications are echoes of our
     /// own changes and are not shown.
     tracking_config: Arc<AtomicBool>,
+    remote: Option<Arc<RemoteSession>>,
 }
 
 impl SessionShared {
-    fn send(&self, event: AcpEvent) {
+    fn send(&self, mut event: AcpEvent) {
+        if let Some(remote) = &self.remote {
+            match &mut event {
+                AcpEvent::ToolCall(call) => {
+                    remote.rebase_tool_paths(&mut call.locations, &mut call.content);
+                }
+                AcpEvent::ToolUpdate(update) => remote.rebase_tool_paths(
+                    update.fields.locations.as_deref_mut().unwrap_or_default(),
+                    update.fields.content.as_deref_mut().unwrap_or_default(),
+                ),
+                _ => {}
+            }
+        }
         let _ = self.log_tx.send(event.to_string()); // Display = JSON; the writer adds '\n'
     }
 
@@ -267,22 +281,32 @@ impl AcpAgentHarnessV2 {
         let env_vars = env.clone().with_profile(cmd_overrides).vars;
         let mut child = spawn_acp_process(current_dir, command_parts, &env_vars).await?;
 
+        let line_ending = if cfg!(windows) && client_transcript.is_some() {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        let transport = take_transport_with_line_ending(child.inner(), line_ending)?;
+        let writer = crate::stdout_dup::create_stdout_pipe_writer(&mut child)?;
         let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<ExecutorExitResult>();
         let cancel = CancellationToken::new();
 
         Self::bootstrap_acp_connection(
-            &mut child,
+            transport,
+            writer,
             current_dir.to_path_buf(),
             existing_session,
             prompt_to_send,
-            Some(exit_tx),
+            exit_tx,
             self.config.clone(),
             self.discovery_key.clone(),
             mcp_servers,
             client_transcript,
             approvals,
             cancel.clone(),
-        )?;
+            None,
+            None,
+        );
 
         Ok(SpawnedChild {
             child,
@@ -292,30 +316,75 @@ impl AcpAgentHarnessV2 {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(in crate::executors) async fn spawn_trusted_node(
+        &self,
+        node: &str,
+        registry_id: &str,
+        current_dir: &Path,
+        prompt: String,
+        session_id: Option<&str>,
+        env: &ExecutionEnv,
+        approvals: Option<Arc<dyn ExecutorApprovalService>>,
+    ) -> Result<SpawnedChild, ExecutorError> {
+        if approvals.is_none() && !self.config.auto_approve() {
+            return Err(ExecutorError::Io(std::io::Error::other(
+                "Trusted ACP node requires the local approval service for supervised execution",
+            )));
+        }
+        let (mut ssh, scope, cwd, existing_session) = trusted_node::connect(
+            node,
+            registry_id,
+            current_dir,
+            &env.repo_context,
+            session_id,
+        )
+        .await?;
+        let transport = take_transport_with_line_ending(&mut ssh, "\n")?;
+        // A transport exit can precede the final ACP result. Let the harness decide
+        // completion while the existing container tracks this local output process.
+        let (mut spawned, writer) = crate::stdout_dup::spawn_local_output_process()?;
+        spawned.child.inner().stderr = ssh.stderr.take();
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        let cancel = CancellationToken::new();
+        Self::bootstrap_acp_connection(
+            transport,
+            writer,
+            cwd,
+            existing_session,
+            prompt,
+            exit_tx,
+            self.config.clone(),
+            None,
+            Vec::new(),
+            None,
+            approvals,
+            cancel.clone(),
+            Some(Arc::new(scope)),
+            Some(ssh),
+        );
+        spawned.exit_signal = Some(exit_rx);
+        spawned.cancel = Some(cancel);
+        Ok(spawned)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn bootstrap_acp_connection(
-        child: &mut AsyncGroupChild,
+        transport: impl ConnectTo<Client>,
+        writer: impl AsyncWrite + Send + 'static,
         cwd: PathBuf,
         existing_session: Option<String>,
         prompt: String,
-        exit_signal: Option<tokio::sync::oneshot::Sender<ExecutorExitResult>>,
+        exit_signal: tokio::sync::oneshot::Sender<ExecutorExitResult>,
         config: DesiredConfig,
         discovery_key: Option<ExecutorConfigCacheKey>,
         mcp_servers: Vec<McpServer>,
         client_transcript: Option<Arc<SessionManager>>,
         approvals: Option<Arc<dyn ExecutorApprovalService>>,
         cancel: CancellationToken,
-    ) -> Result<(), ExecutorError> {
-        // Older ACP agents can require CRLF on Windows.
+        remote: Option<Arc<RemoteSession>>,
+        ssh: Option<Child>,
+    ) {
         let record_client_transcript = client_transcript.is_some();
-        let line_ending = if cfg!(windows) && record_client_transcript {
-            "\r\n"
-        } else {
-            "\n"
-        };
-        let transport = take_transport_with_line_ending(child, line_ending)?;
-
-        // Create a fresh stdout pipe for logs
-        let writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
         let (log_tx, log_rx) = mpsc::unbounded_channel::<String>();
         let log_writer = tokio::spawn(write_logs(writer, log_rx, client_transcript.clone()));
 
@@ -327,6 +396,7 @@ impl AcpAgentHarnessV2 {
             options: Arc::default(),
             tracking_config: Arc::new(AtomicBool::new(false)),
             discovery_key,
+            remote,
         };
         let notification_shared = shared.clone();
         let permission_shared = shared.clone();
@@ -413,6 +483,9 @@ impl AcpAgentHarnessV2 {
                     .await
                 })
                 .await;
+            // Closing the connection releases the remote subsystem. Killing the local SSH
+            // transport on drop also covers a node that didn't acknowledge cancellation.
+            drop(ssh);
 
             // Notify container of completion
             let exit = match result {
@@ -425,12 +498,8 @@ impl AcpAgentHarnessV2 {
             // The container closes the execution log stream after the exit signal.
             drop(log_tx);
             let _ = log_writer.await;
-            if let Some(tx) = exit_signal {
-                let _ = tx.send(exit);
-            }
+            let _ = exit_signal.send(exit);
         });
-
-        Ok(())
     }
 }
 
@@ -502,20 +571,20 @@ pub(crate) async fn spawn_acp_process(
 pub(crate) fn take_transport(
     child: &mut AsyncGroupChild,
 ) -> Result<impl ConnectTo<Client> + use<>, ExecutorError> {
-    take_transport_with_line_ending(child, "\n")
+    take_transport_with_line_ending(child.inner(), "\n")
 }
 
 fn take_transport_with_line_ending(
-    child: &mut AsyncGroupChild,
+    child: &mut Child,
     line_ending: &'static str,
 ) -> Result<impl ConnectTo<Client> + use<>, ExecutorError> {
-    let orig_stdout = child.inner().stdout.take().ok_or_else(|| {
+    let orig_stdout = child.stdout.take().ok_or_else(|| {
         ExecutorError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Child process has no stdout",
         ))
     })?;
-    let orig_stdin = child.inner().stdin.take().ok_or_else(|| {
+    let orig_stdin = child.stdin.take().ok_or_else(|| {
         ExecutorError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Child process has no stdin",
@@ -703,7 +772,11 @@ async fn run_session(
     mut mcp_servers: Vec<McpServer>,
     client_transcript: Option<&SessionManager>,
 ) -> Result<(), acp::Error> {
-    let init_response = initialize_agent(&connection, client_transcript.is_some()).await?;
+    let init_response = tokio::select! {
+        biased;
+        _ = shared.cancel.cancelled() => return Ok(()),
+        response = initialize_agent(&connection, client_transcript.is_some()) => response?,
+    };
 
     let capabilities = &init_response.agent_capabilities.mcp_capabilities;
     let configured = mcp_servers.len();
@@ -742,17 +815,23 @@ async fn run_session(
         }
         shared.replaying.store(true, Ordering::SeqCst);
     }
-    let opened =
-        open_session_with_mcp(&connection, existing_session, cwd, mcp_servers, history).await;
+    let opened = tokio::select! {
+        biased;
+        _ = shared.cancel.cancelled() => return Ok(()),
+        response = open_session_with_mcp(&connection, existing_session, cwd, mcp_servers, history) => response,
+    };
     shared.replaying.store(false, Ordering::SeqCst);
     let (session_id, mut options) = opened?;
     if let Some(key) = &shared.discovery_key {
         super::discovery::forget_failure(key);
     }
 
-    shared.send(AcpEvent::SessionStart(
-        display_id.unwrap_or_else(|| session_id.clone()),
-    ));
+    shared.send(AcpEvent::SessionStart(display_id.unwrap_or_else(
+        || match &shared.remote {
+            Some(remote) => remote.display_id(&session_id),
+            None => session_id.clone(),
+        },
+    )));
     // Record the user's actual input once. The resume wrapper is only for the agent.
     let prompt = if client_transcript.is_some() {
         if let Some(resume_prompt) = resume_prompt {
@@ -771,20 +850,29 @@ async fn run_session(
         )));
     }
 
-    apply_session_config(
-        &connection,
-        &session_id,
-        &mut options,
-        config,
-        &shared,
-        client_transcript.is_some(),
-    )
-    .await;
+    tokio::select! {
+        biased;
+        _ = shared.cancel.cancelled() => {
+            connection.send_notification(CancelNotification::new(session_id))?;
+            return Ok(());
+        }
+        () = apply_session_config(
+            &connection,
+            &session_id,
+            &mut options,
+            config,
+            &shared,
+            client_transcript.is_some(),
+        ) => {}
+    }
 
     // Denial feedback is delivered after the turn ends. Some agents (Copilot) end their turn on
     // rejection; others may keep working first, so for them the feedback can arrive late.
     let mut next_prompt = Some(prompt);
     while let Some(text) = next_prompt.take() {
+        if shared.cancel.is_cancelled() {
+            break;
+        }
         // Read the complete result because the typed schema gates `usage` behind
         // an unstable feature. The stable stop reason still uses its schema type.
         let request = UntypedMessage::new(
@@ -804,7 +892,10 @@ async fn run_session(
 
                 match tokio::time::timeout(CANCEL_GRACE, &mut turn).await {
                     Ok(res) => res,
-                    Err(_) => return Ok(()),          // agent didn't answer in time; container will kill it
+                    Err(_) if shared.remote.is_some() => return Err(acp::util::internal_error(
+                        "Trusted ACP node did not acknowledge cancellation before disconnect",
+                    )),
+                    Err(_) => return Ok(()), // The container will kill the local agent.
                 }
             }
         };
@@ -822,7 +913,7 @@ async fn run_session(
             }
             Err(e) => {
                 tracing::debug!("error {} {e} {:?}", e.code, e.data);
-                if acp::is_incoming_transport_closed(&e) {
+                if shared.remote.is_none() && acp::is_incoming_transport_closed(&e) {
                     tracing::debug!("ACP server killed");
                 } else {
                     return Err(e);
@@ -956,6 +1047,92 @@ mod mcp_requests {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn trusted_node_cancel_records_acknowledgment_and_usage() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (transport, mut peer) = Channel::duplex();
+            let (log_tx, mut log_rx) = mpsc::unbounded_channel();
+            let cancel = CancellationToken::new();
+            let workspace = "/shared/workspace";
+            let scope = Arc::new(RemoteSession::new(b"test node", workspace.into()));
+            let expected_id = scope.display_id("node-session");
+            let shared = SessionShared {
+                log_tx,
+                cancel: cancel.clone(),
+                replaying: Arc::default(),
+                denial_feedback: Arc::default(),
+                options: Arc::default(),
+                discovery_key: None,
+                tracking_config: Arc::default(),
+                remote: Some(scope),
+            };
+            let client = tokio::spawn(acp::Client.builder().connect_with(
+                transport,
+                async move |cx| {
+                    run_session(
+                        cx,
+                        None,
+                        PathBuf::from(workspace),
+                        "test".into(),
+                        DesiredConfig::default(),
+                        shared,
+                        Vec::new(),
+                        None,
+                    )
+                    .await
+                },
+            ));
+            let initialize = receive(&mut peer).await;
+            assert_eq!(initialize["method"], "initialize");
+            reply(&peer, &initialize, json!({"protocolVersion": 1}));
+            let session = receive(&mut peer).await;
+            assert_eq!(session["method"], "session/new");
+            assert_eq!(session["params"]["cwd"], workspace);
+            assert_eq!(session["params"]["mcpServers"], json!([]));
+            reply(&peer, &session, json!({"sessionId": "node-session"}));
+            let prompt = receive(&mut peer).await;
+            assert_eq!(prompt["method"], "session/prompt");
+            cancel.cancel();
+            let stop = receive(&mut peer).await;
+            assert_eq!(stop["method"], "session/cancel");
+            assert_eq!(stop["params"]["sessionId"], "node-session");
+            reply(
+                &peer,
+                &prompt,
+                json!({
+                    "stopReason": "cancelled",
+                    "usage": {"totalTokens": 50, "inputTokens": 39, "outputTokens": 11},
+                }),
+            );
+            client.await.unwrap().unwrap();
+            let mut events = Vec::new();
+            while let Ok(line) = log_rx.try_recv() {
+                events.push(line.parse::<AcpEvent>().unwrap());
+            }
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, AcpEvent::SessionStart(id) if id == &expected_id))
+            );
+            assert!(
+                events.iter().any(
+                    |event| matches!(event, AcpEvent::Done(reason) if reason == "\"cancelled\"")
+                )
+            );
+            assert!(events.iter().any(|event| matches!(
+                event,
+                AcpEvent::Usage(AcpUsageUpdate::Prompt(ExecutionTokenUsage {
+                    input_tokens: 39,
+                    output_tokens: 11,
+                    cumulative: true,
+                    ..
+                }))
+            )));
+        })
+        .await
+        .expect("trusted ACP cancellation timed out");
+    }
+
     async fn capture_session_request(
         cwd: PathBuf,
         existing: Option<&str>,
@@ -974,6 +1151,7 @@ mod mcp_requests {
                 options: Arc::default(),
                 discovery_key: None,
                 tracking_config: Arc::default(),
+                remote: None,
             };
             let existing_session = existing.map(str::to_owned);
             let client = tokio::spawn(acp::Client.builder().connect_with(
@@ -1236,6 +1414,7 @@ mod mcp_requests {
                 options: Arc::default(),
                 discovery_key: None,
                 tracking_config: Arc::default(),
+                remote: None,
             };
             let cwd = dir.path().to_owned();
             let client_store = store.clone();

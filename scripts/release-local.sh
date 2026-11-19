@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Build and publish an npx-only release from a Mac, without GitHub Actions or
-# R2. Binaries go to the GitHub Release for the tag; the npm package goes to
-# the `next` dist-tag first and is promoted to `latest` once tested.
+# Build a release from a Mac with NSH Web, NSH Win32 and standalone server assets.
+# Binaries go to the tagged GitHub Release. npm gets the `next` dist-tag first.
 # See RELEASING.md for the full walkthrough.
 #
-# Usage:
-#   scripts/release-local.sh build [platform...]  build binaries + npm package
-#                                                 (default all; or e.g. macos)
-#   scripts/release-local.sh smoke                test the package on this Mac
+# Usage (invoke this script with bash):
+#   scripts/release-local.sh build [platform...]  build NSH Web + standalone CLI
+#                                                 (requires VK_WINDOWS_PACKAGE for windows-x64)
+#   scripts/release-local.sh smoke                test the npm package on this Mac
 #   scripts/release-local.sh publish              GitHub pre-release, smoke test
 #                                                 against it, then npm @next
 #   scripts/release-local.sh promote              make it @latest
@@ -21,7 +20,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-REPO="BloopAI/vibe-kanban"
+REPO="${VK_RELEASE_REPO:-blackplume233/vibe-kanban}"
 NPM_PACKAGE="vibe-kanban"
 OUT_ROOT="$ROOT/release-out"
 # Build-time values are looked up in the environment, then .env.release, then
@@ -30,14 +29,10 @@ ENV_FILES=("$ROOT/.env.release" "$ROOT/.env")
 IMAGE="vibe-kanban-release-cross"
 PLATFORMS=(macos-arm64 macos-x64 linux-x64 linux-arm64 windows-x64 windows-arm64)
 BINARIES=(vibe-kanban vibe-kanban-mcp vibe-kanban-review)
-REQUIRED_ENV=(VK_SHARED_API_BASE VITE_PUBLIC_REACT_VIRTUOSO_LICENSE_KEY)
-# Relay is sunset along with the other remote features; builds without it
-# just report relay as unavailable.
-OPTIONAL_ENV=(VITE_VK_SHARED_API_BASE VK_SHARED_RELAY_API_BASE)
+OPTIONAL_ENV=(VK_SHARED_API_BASE VK_SHARED_RELAY_API_BASE)
 # Releases never include analytics or crash reporting. These are cleared
 # before every build so nothing from .env or the shell can switch them on.
-ANALYTICS_ENV=(POSTHOG_API_KEY POSTHOG_API_ENDPOINT SENTRY_DSN SENTRY_DSN_REMOTE
-  VITE_POSTHOG_API_KEY VITE_POSTHOG_API_ENDPOINT VITE_SENTRY_DSN SENTRY_AUTH_TOKEN)
+ANALYTICS_ENV=(POSTHOG_API_KEY POSTHOG_API_ENDPOINT SENTRY_DSN SENTRY_AUTH_TOKEN)
 
 die() { echo "error: $*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -70,7 +65,7 @@ load_release() {
   DRY_RUN=""
   if ! TAG="$(git describe --tags --exact-match --match 'v*' HEAD 2>/dev/null)"; then
     [[ "${1:-}" == "--allow-dry-run" ]] \
-      || die "HEAD has no v* tag. Run ./bump-version.sh first."
+      || die "HEAD has no v* tag. Run bash ./bump-version.sh first."
     TAG="v$VERSION-dryrun"
     DRY_RUN=1
     echo "HEAD has no v* tag: dry run as $TAG (cannot be published)"
@@ -86,6 +81,8 @@ require_all_assets() {
   local platform bin
   [[ -f "$ASSETS/manifest.json" ]] || die "missing $ASSETS/manifest.json; run build"
   [[ -f "$TGZ" ]] || die "missing $TGZ; run build"
+  [[ -f "$ASSETS/vibe-own-web.zip" && -f "$ASSETS/windows-x64-vibe-own.zip" ]] \
+    || die "missing NSH Web or Windows package; run build for all platforms"
   for platform in "${PLATFORMS[@]}"; do
     for bin in "${BINARIES[@]}"; do
       [[ -f "$ASSETS/$platform-$bin.zip" ]] \
@@ -94,7 +91,7 @@ require_all_assets() {
     # Platforms can be built in separate runs; all of them must come from
     # this exact, clean commit.
     [[ "$(cat "$OUT/built-from/$platform" 2>/dev/null)" == "$(git rev-parse HEAD)" ]] \
-      || die "$platform was not built from HEAD ($(git rev-parse --short HEAD)) on a clean tree; run: scripts/release-local.sh build $platform"
+      || die "$platform was not built from HEAD ($(git rev-parse --short HEAD)) on a clean tree; run: bash scripts/release-local.sh build $platform"
   done
 }
 
@@ -125,75 +122,23 @@ resolve_env() {
 
 load_env() {
   local name
-  for name in "${REQUIRED_ENV[@]}" "${OPTIONAL_ENV[@]}"; do
+  for name in "${OPTIONAL_ENV[@]}"; do
     resolve_env "$name"
   done
-  for name in "${REQUIRED_ENV[@]}"; do
-    [[ -n "${!name:-}" ]] || die "$name is not set (environment, .env.release or .env)"
-  done
-  export VITE_VK_SHARED_API_BASE="${VITE_VK_SHARED_API_BASE:-$VK_SHARED_API_BASE}"
   for name in "${ANALYTICS_ENV[@]}"; do
     unset "$name"
   done
   export SQLX_OFFLINE=true
 
-  echo "Build settings:"
-  echo "  VK_SHARED_API_BASE=$VK_SHARED_API_BASE"
-  for name in VITE_PUBLIC_REACT_VIRTUOSO_LICENSE_KEY VK_SHARED_RELAY_API_BASE; do
-    if [[ -n "${!name:-}" ]]; then
-      echo "  $name: set"
-    else
-      echo "  $name: not set"
-    fi
-  done
-  echo "  analytics and crash reporting: off (always, for releases)"
+  echo "Build settings: analytics and crash reporting off"
 }
 
 # --- build -------------------------------------------------------------------
 
-# The server embeds packages/local-web/dist at compile time, so every fresh
-# Vite build makes cargo recompile and relink the server for every target.
-# Skip Vite when its inputs and its last output are unchanged; the cargo
-# builds are then no-ops too.
-FRONTEND_INPUTS=(packages shared package.json pnpm-lock.yaml)
-FRONTEND_STAMP="$OUT_ROOT/.frontend-stamp"
-
-# Prints nothing when the inputs have uncommitted changes (always rebuild).
-frontend_inputs_hash() {
-  [[ -z "$(git status --porcelain -- "${FRONTEND_INPUTS[@]}")" ]] || return 0
-  {
-    local path
-    for path in "${FRONTEND_INPUTS[@]}"; do git rev-parse "HEAD:$path"; done
-    # Values Vite builds in; hashed, never printed.
-    env | grep '^VITE_' | LC_ALL=C sort
-    cat packages/local-web/.env* 2>/dev/null || true
-  } | shasum -a 256 | cut -d' ' -f1
-}
-
-frontend_dist_hash() {
-  [[ -d packages/local-web/dist ]] || return 0
-  (cd packages/local-web/dist && find . -type f -print0 | LC_ALL=C sort -z \
-    | xargs -0 shasum -a 256) | shasum -a 256 | cut -d' ' -f1
-}
-
-build_frontend() {
-  local inputs dist
-  inputs="$(frontend_inputs_hash)"
-  dist="$(frontend_dist_hash)"
-  if [[ -n "$inputs" && -n "$dist" && -f "$FRONTEND_STAMP" \
-    && "$(cat "$FRONTEND_STAMP")" == "$inputs $dist" ]]; then
-    step "Frontend unchanged since the last build; reusing packages/local-web/dist"
-    return
-  fi
-  step "Building frontend"
-  pnpm install --frozen-lockfile
-  (cd packages/local-web && npm run build)
-  mkdir -p "$OUT_ROOT"
-  if [[ -n "$inputs" ]]; then
-    echo "$inputs $(frontend_dist_hash)" >"$FRONTEND_STAMP"
-  else
-    rm -f "$FRONTEND_STAMP"
-  fi
+build_web() {
+  step "Packaging NSH Web"
+  node scripts/nsh.mjs web "$OUT/web"
+  python3 scripts/release/package-assets.py web "$OUT/web/vibe-own" "$ASSETS/vibe-own-web.zip"
 }
 
 build_macos() {
@@ -204,9 +149,10 @@ build_macos() {
   esac
   step "Building $platform"
   rustup target add "$target" >/dev/null
-  MACOSX_DEPLOYMENT_TARGET="$deployment" cargo build --release --target "$target" \
+  MACOSX_DEPLOYMENT_TARGET="$deployment" cargo build --locked --release --target "$target" \
+    --target-dir "${CARGO_TARGET_DIR:-target}" \
     -p server -p mcp -p review --bin server --bin vibe-kanban-mcp --bin review
-  local src="target/$target/release" dest="$OUT/build/$platform"
+  local src="${CARGO_TARGET_DIR:-target}/$target/release" dest="$OUT/build/$platform"
   mkdir -p "$dest"
   cp "$src/server" "$dest/vibe-kanban"
   cp "$src/vibe-kanban-mcp" "$dest/vibe-kanban-mcp"
@@ -238,7 +184,7 @@ build_cross() {
   docker build -t "$IMAGE" --build-arg RUST_TOOLCHAIN="$toolchain" scripts/release
   mkdir -p "$OUT/build"
   local env_args=() name
-  for name in "${REQUIRED_ENV[@]}" "${OPTIONAL_ENV[@]}"; do
+  for name in "${OPTIONAL_ENV[@]}"; do
     env_args+=(-e "$name")
   done
   docker run --rm \
@@ -253,15 +199,12 @@ build_cross() {
     "$IMAGE" bash /src/scripts/release/build-cross.sh "$@"
 }
 
-# Belt and braces for "releases ship no analytics": a PostHog project key or a
-# Sentry DSN could still arrive from a file Vite reads on its own
-# (packages/local-web/.env*). Source maps are skipped: @sentry/browser's carry
-# a disabled example DSN in a comment.
+# Detect analytics credentials from build-time environment files.
 verify_no_analytics() {
   step "Checking that no analytics keys were built in"
   local pattern='phc_[A-Za-z0-9]{20,}|https://[0-9a-f]{32}@[a-z0-9.-]+'
   local hits
-  hits="$(grep -rlE --exclude='*.map' "$pattern" packages/local-web/dist "$OUT/build" 2>/dev/null || true)"
+  hits="$(grep -rlE --exclude='*.map' "$pattern" "$OUT/web/vibe-own" "$OUT/build" 2>/dev/null || true)"
   [[ -z "$hits" ]] || die "found a PostHog key or Sentry DSN in: $hits"
   echo "  none found"
 }
@@ -269,17 +212,12 @@ verify_no_analytics() {
 package_binaries() {
   step "Packaging binaries"
   mkdir -p "$ASSETS"
-  local platform bin ext file
+  local platform
   for platform in "$@"; do
-    ext=""
-    [[ "$platform" == windows-* ]] && ext=".exe"
-    for bin in "${BINARIES[@]}"; do
-      file="$OUT/build/$platform/$bin$ext"
-      [[ -f "$file" ]] || die "build output missing: $file"
-      rm -f "$ASSETS/$platform-$bin.zip"
-      zip -q -j -X "$ASSETS/$platform-$bin.zip" "$file"
-      printf '  %-34s %s\n' "$platform-$bin.zip" "$(file -b "$file" | cut -c1-70)"
-    done
+    python3 scripts/release/package-assets.py platform "$platform" "$OUT/build/$platform" "$OUT/web/vibe-own" "$ASSETS"
+    if [[ "$platform" == windows-x64 ]]; then
+      python3 scripts/release/package-assets.py native "$VK_WINDOWS_PACKAGE" "$ASSETS"
+    fi
     # Which commit this platform's zips came from; "dirty" never matches HEAD.
     mkdir -p "$OUT/built-from"
     if [[ -n "$(git status --porcelain)" ]]; then
@@ -292,25 +230,7 @@ package_binaries() {
 
 write_manifest() {
   step "Writing manifest.json"
-  node - "$ASSETS" "$TAG" <<'EOF'
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const [dir, tag] = process.argv.slice(2);
-const manifest = { version: tag, platforms: {} };
-for (const name of fs.readdirSync(dir).sort()) {
-  const m = name.match(/^((?:macos|linux|windows)-(?:x64|arm64))-(.+)\.zip$/);
-  if (!m) continue;
-  const data = fs.readFileSync(path.join(dir, name));
-  manifest.platforms[m[1]] ??= {};
-  manifest.platforms[m[1]][m[2]] = {
-    sha256: crypto.createHash('sha256').update(data).digest('hex'),
-    size: data.length,
-  };
-}
-fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-console.log(`  ${Object.keys(manifest.platforms).length} platform(s)`);
-EOF
+  python3 scripts/release/package-assets.py manifest "$ASSETS" "$TAG"
 }
 
 # Pack from a staging copy: a dist/ folder inside the published package would
@@ -321,10 +241,7 @@ pack_npm() {
   local staging="$OUT/npm"
   rm -rf "$staging"
   mkdir -p "$staging"
-  cp -R npx-cli/bin "$staging/bin"
-  cp npx-cli/package.json npx-cli/README.md "$staging/"
-  sed -i '' "s|__BINARY_TAG__|$TAG|g" "$staging/bin/cli.js"
-  ! grep -q "__BINARY_TAG__" "$staging/bin/cli.js" || die "BINARY_TAG placeholder left in cli.js"
+  node scripts/release/stage-npm.mjs "$staging" "$TAG" "https://github.com/$REPO/releases/download"
   (cd "$staging" && npm pack --silent --pack-destination "$ASSETS" >/dev/null)
   [[ -f "$TGZ" ]] || die "npm pack did not produce $TGZ"
   if tar -tzf "$TGZ" | grep -q '^package/dist/'; then
@@ -348,13 +265,16 @@ cmd_build() {
     esac
   done
   [[ ${#selected[@]} -gt 0 ]] || selected=("${PLATFORMS[@]}")
+  if contains windows-x64 "${selected[@]}"; then
+    [[ -f "${VK_WINDOWS_PACKAGE:-}" ]] || die 'Set VK_WINDOWS_PACKAGE to the locked CLI output package-windows/vibe-own.zip from a Windows x64 build of this checkout.'
+  fi
   if [[ -n "$(git status --porcelain)" && "${ALLOW_DIRTY:-}" != "1" ]]; then
     die "working tree is not clean (set ALLOW_DIRTY=1 to build anyway)"
   fi
   load_env
   echo "Release $TAG (npm $VERSION) -> $OUT"
 
-  build_frontend
+  build_web
   local cross=()
   for platform in "${selected[@]}"; do
     case "$platform" in
@@ -368,7 +288,7 @@ cmd_build() {
   package_binaries "${selected[@]}"
   write_manifest
   pack_npm
-  step "Built $TAG. Next: scripts/release-local.sh smoke"
+  step "Built $TAG. Next: bash scripts/release-local.sh smoke"
 }
 
 # --- smoke test ----------------------------------------------------------------
@@ -453,8 +373,8 @@ run_smoke() {
     return
   fi
 
-  step "App: start through the wrapper and wait for /api/health (a browser tab may open)"
-  env "${run_env[@]}" BACKEND_PORT="$app_port" node "$cli" >"$tmp/app.log" 2>&1 &
+  step "App: start through the wrapper and wait for same-origin /api/health"
+  env "${run_env[@]}" VK_ASSET_DIR="$tmp/data" BACKEND_PORT="$app_port" node "$cli" >"$tmp/app.log" 2>&1 &
   SMOKE_PIDS+=("$!")
   local ok=""
   for i in $(seq 1 120); do
@@ -468,12 +388,10 @@ run_smoke() {
     tail -20 "$tmp/app.log" >&2
     die "app did not answer on /api/health within 120s"
   fi
-  # The frontend is embedded in the binary; check it and its images are served.
-  local url="http://127.0.0.1:$app_port"
-  curl -fs "$url/" | grep -q '<title>Vibe Kanban</title>' || die "app did not serve the frontend"
-  local asset
-  for asset in vibe-kanban-logo.svg agents/claude-light.svg ide/vscode-light.svg; do
-    curl -fs -o /dev/null "$url/$asset" || die "app did not serve /$asset"
+  local url="http://127.0.0.1:$app_port" web_dir="$tmp/home/.vibe-kanban/bin/$TAG/$platform/web" wasm
+  curl -fs "$url/" | cmp -s - "$web_dir/index.html" || die "app did not serve the packaged index"
+  for wasm in "$web_dir"/nsh.*.wasm; do
+    curl -fs "$url/$(basename "$wasm")" | cmp -s - "$wasm" || die "app did not serve the packaged WASM"
   done
   step "Smoke test passed for $platform"
 
@@ -538,9 +456,11 @@ cmd_publish() {
     die "$NPM_PACKAGE@$VERSION was already published to npm (maybe since unpublished) and cannot be reused; run ./bump-version.sh"
   fi
 
-  git fetch --quiet origin main
-  if ! git merge-base --is-ancestor HEAD origin/main; then
-    echo "note: $TAG is not on origin/main (fine when releasing from a PR branch)."
+  local branch
+  branch="$(git symbolic-ref --quiet --short HEAD || echo my/main)"
+  git fetch --quiet origin "$branch"
+  if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+    echo "note: $TAG is not on origin/$branch."
     confirm "Release it anyway?" || exit 1
   fi
 

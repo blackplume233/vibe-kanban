@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use axum::{
     Router,
     routing::{IntoMakeService, get},
@@ -15,7 +17,7 @@ pub mod filesystem;
 pub mod attachments;
 pub mod events;
 pub mod execution_processes;
-pub mod frontend;
+mod frontend;
 pub mod health;
 pub mod host_relay;
 pub mod oauth;
@@ -38,7 +40,7 @@ pub mod agent_management;
 // vibe-own M2
 mod issues;
 
-pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
+pub fn router(deployment: DeploymentImpl, web_root: Option<&Path>) -> IntoMakeService<Router> {
     let relay_signed_routes = Router::new()
         .route("/health", get(health::health_check))
         .merge(config::router())
@@ -87,10 +89,7 @@ pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
         .layer(axum::middleware::from_fn(middleware::log_server_errors))
         .with_state(deployment);
 
-    Router::new()
-        .route("/", get(frontend::serve_frontend_root))
-        .route("/{*path}", get(frontend::serve_frontend))
-        .nest("/api", api_routes)
+    frontend::with_api(api_routes, web_root)
         .layer(CompressionLayer::new())
         .into_make_service()
 }

@@ -12,6 +12,13 @@
       "type": "string",
       "readOnly": true
     },
+    "trusted_node": {
+      "description": "Name in the local `VK_ACP_TRUSTED_NODES_FILE` allowlist.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "append_prompt": {
       "title": "Append Prompt",
       "description": "Extra text appended to the prompt",

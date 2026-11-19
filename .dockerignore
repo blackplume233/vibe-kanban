@@ -10,6 +10,7 @@ lerna-debug.log*
 
 # Build artifacts
 **/target/
+**/.nsh/
 dist/
 build/
 *.tgz

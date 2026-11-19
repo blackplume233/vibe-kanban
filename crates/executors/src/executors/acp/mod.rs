@@ -6,6 +6,7 @@ mod permissions;
 pub mod registry;
 pub mod session;
 pub mod session_config;
+pub(super) mod trusted_node;
 
 use std::{fmt::Display, str::FromStr};
 

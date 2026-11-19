@@ -51,7 +51,7 @@ impl ServerHandle {
             .expect("client preview proxy port already set");
         relay_registration::spawn_relay(&self.deployment).await;
 
-        let app_router = routes::router(self.deployment.clone());
+        let app_router = routes::router(self.deployment.clone(), None);
         let proxy_router: axum::Router = routes::preview::subdomain_router(self.deployment.clone())
             .layer(ValidateRequestHeaderLayer::custom(validate_origin));
 

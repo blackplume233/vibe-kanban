@@ -1,52 +1,29 @@
-TIMESTAMP="$(date +%s)"
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-if [[ "$1" == "--prerelease" ]]; then
-  npm version prerelease --preid="$2" --no-git-tag-version
-elif [[ "$1" == "--major" ]]; then
-  npm version major --no-git-tag-version
-elif [[ "$1" == "--minor" ]]; then
-  npm version minor --no-git-tag-version
-else
-  npm version patch --no-git-tag-version
-fi
+bump="${1:---patch}"
+case "$bump" in
+  --prerelease) npm version prerelease --preid="${2:-rc}" --no-git-tag-version ;;
+  --major|--minor|--patch) npm version "${bump#--}" --no-git-tag-version ;;
+  *) echo "Usage: $0 [--patch|--minor|--major|--prerelease [identifier]]" >&2; exit 2 ;;
+esac
 
-NEW_VERSION=$(node -p "require('./package.json').version")
-NEW_TAG="v$NEW_VERSION.$TIMESTAMP"
+version=$(node -p "require('./package.json').version")
+tag="v$version.$(date +%s)"
+npm --prefix npx-cli version "$version" --no-git-tag-version --allow-same-version
+cargo set-version --workspace "$version"
+cargo metadata --format-version 1 >/dev/null
+cargo metadata --manifest-path crates/nsh-app/Cargo.toml --format-version 1 >/dev/null
 
-echo "NEW_VERSION: $NEW_VERSION"
-echo "NEW_TAG: $NEW_TAG"
-
-(
-  cd npx-cli || exit
-  npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
-)
-
-(
-  cd packages/local-web || exit
-  npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
-)
-
-cargo set-version "$NEW_VERSION"
-
-# set-version leaves the lock files at the old version of our own crates.
-# Resolving offline rewrites just those entries.
-for manifest in Cargo.toml crates/remote/Cargo.toml crates/relay-tunnel/Cargo.toml; do
-  [ -f "$manifest" ] || continue
-  cargo metadata --manifest-path "$manifest" --format-version 1 --offline >/dev/null \
-    || echo "warning: could not update the lock file for $manifest"
-done
-
-node -e "
-  const fs = require('fs');
-  const path = 'crates/tauri-app/tauri.conf.json';
-  const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
-  conf.version = '$NEW_VERSION';
-  fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
-"
-
-git add package.json Cargo.lock pnpm-lock.yaml npx-cli/package.json npx-cli/package-lock.json packages/local-web/package.json crates/tauri-app/tauri.conf.json
-git add $(find . -name Cargo.toml)
-[ -f crates/remote/Cargo.lock ] && git add crates/remote/Cargo.lock || true
-[ -f crates/relay-tunnel/Cargo.lock ] && git add crates/relay-tunnel/Cargo.lock || true
-git commit -m "chore: bump version to $NEW_VERSION"
-git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+git add package.json npx-cli/package.json npx-cli/package-lock.json Cargo.lock crates/nsh-app/Cargo.lock
+# cargo set-version --workspace changes the root workspace manifests only.
+cargo metadata --no-deps --format-version 1 | node -e '
+  const fs = require("node:fs");
+  const { spawnSync } = require("node:child_process");
+  const { packages } = JSON.parse(fs.readFileSync(0, "utf8"));
+  const result = spawnSync("git", ["add", "--", ...packages.map(pkg => pkg.manifest_path)], { stdio: "inherit" });
+  process.exit(result.status ?? 1);
+'
+git commit -m "chore: bump version to $version"
+git tag -a "$tag" -m "Release $tag"
