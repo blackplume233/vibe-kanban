@@ -24,22 +24,22 @@
 
 | ID | 可观察结果 | 预期证据 | 依赖 | 状态 |
 |---|---|---|---|---|
-| M0 基线 | fork 在 `my/main` 上完整构建通过；Goal 目录已提交 | E1 中的 cargo check/test、pnpm check/lint 日志；首个提交 hash | 网络、工具链 | in-progress（本地 Web 构建、公开 Cargo 工作区检查与测试通过。完整 `pnpm check` 卡在私有 `billing` 依赖认证，完整 `pnpm lint` 卡在缺少 Clippy。见 `evidence/m0-build.md`） |
+| M0 基线 | fork 在 `my/main` 上完整构建通过；Goal 目录已提交 | E1 中的 cargo check/test、pnpm check/lint 日志；首个提交 hash | 网络、工具链 | in-progress（公开构建、检查和测试通过。Clippy 已安装，Windows 诊断由 M0WindowsLint 处理。完整 check 需处理私有 `billing`。） |
 | M1 NSH Spike（路线闸门） | `crates/nsh-app` 在 Windows 原生窗口与浏览器中都能列工作区、看会话日志流、显示 diff | 两端截图；`--fps` 日志；switch_trigger 逐项判定记录 | M0、D4（LLVM） | in-progress（Rust 1.99.1 和锁定 NSH 提交的共享根组件已在 Win32 和 Chrome 渲染通过。见 `evidence/m1-native-build.md`、`evidence/m1-web-build.md`。下一步验证双端 HTTP。） |
-| M2 本地议题底座 | 不设置 `VK_SHARED_API_BASE` 时议题 CRUD、状态、标签、子议题、关系全部在 SQLite 中可用；API 与类型生成通过 | 迁移 + `cargo test`；`generate-types:check`；API 调用记录 | M0、D1 | pending |
-| M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | M1 | pending |
+| M2 本地议题底座 | 不设置 `VK_SHARED_API_BASE` 时议题 CRUD、状态、标签、子议题、关系全部在 SQLite 中可用；API 与类型生成通过 | 迁移 + `cargo test`；`generate-types:check`；API 调用记录 | M0、D1 | in-progress（M2LocalIssues-2） |
+| M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | 设计规范独立，组件接入依赖 M1 | in-progress（M3DesignContract 起草规范） |
 | M4 Linear 级交互与议题能力 | NSH 中的看板/列表、拖拽、Cmd+K 模糊搜索、动作注册表、行内编辑、peek、triage、cycle、保存视图 | E2、E3 录屏与性能日志 | M2、M3 | pending |
-| M5 GitHub 联动 | CI 状态 + 一键修复、review 评论自动 follow-up、GraphQL 批量轮询、Issue 双向同步、PAT 认证 | E5 测试仓库演示记录 | M2 | pending |
-| M6 ACP Agent 管理 | 用量/成本、全局调度器 + 持久队列、MCP 注入、Claude/Codex 统一 ACP、可选远程节点 | E6 测试与 API 输出 | M0 | pending |
+| M5 GitHub 联动 | CI 状态 + 一键修复、review 评论自动 follow-up、GraphQL 批量轮询、Issue 双向同步、PAT 认证 | E5 测试仓库演示记录 | Issue 双向同步依赖 M2 | in-progress（M5GitHubCore-2） |
+| M6 ACP Agent 管理 | 用量/成本、全局调度器 + 持久队列、MCP 注入、Claude/Codex 统一 ACP、可选远程节点 | E6 测试与 API 输出 | M0 | in-progress（M6AcpMgmt-2） |
 | M7 对等与退役 | NSH 功能覆盖 React 版；终端面板可用；React 前端与 `crates/remote` 从默认构建移除；原生与 Web 发布包 | E1、E7；发布包路径与 hash | M4、M5、M6 | pending |
 
 M5、M6 与 M3/M4 可并行（后端与 UI 互不阻塞）。
 
-M0 的公开工作区检查和测试已通过。私有依赖与 Clippy 的待决事项继续计入 M0。M1 双端最小渲染通过。按表继续验收双端 HTTP 与实时流、真实 diff 和滚动性能，另需复核锁定 nightly 的共同编译闸门。
+M0 的公开工作区检查和测试已通过。完整 check 的私有依赖与严格 lint 的源码诊断继续计入 M0。M1 双端最小渲染通过，尚需验收双端 HTTP 与实时流、真实 diff、滚动性能和锁定 nightly 共同编译。
 
 ## 终止规则
 
-- success: E1–E7 全部通过，最终审计无未声明的关键缺口。
+- success: E1–E7 全部通过，最终审计无未声明的关键缺口。此后才推送 `origin/my/main`，并记录远端验证结果。
 - pause_or_block: 外部依赖（网络、NSH 上游缺陷、GitHub 测试仓库/凭据）暂不可用，但目标仍有效且存在明确恢复条件。
 - abandon: 目标不可行、收益不足以覆盖代价，或用户明确取消。
 - supersede: M1 触发 switch_trigger 且用户选择 B 时，以新 plan 替代本路线并记录。
