@@ -270,6 +270,14 @@ fn generate_types_content() -> String {
         relay_webrtc::WsError::decl(),
         relay_webrtc::SdpOffer::decl(),
         relay_webrtc::SdpAnswer::decl(),
+        // vibe-own M6
+        executors::logs::ExecutionTokenUsage::decl(),
+        db::models::execution_usage::ExecutionUsageQuery::decl(),
+        db::models::execution_usage::ExecutionUsageTotal::decl(),
+        db::models::execution_usage::ExecutionPrice::decl(),
+        db::models::execution_queue::ExecutionSchedulerConfig::decl(),
+        db::models::execution_queue::ScheduledExecution::decl(),
+        server::routes::agent_management::ExecutionQueuePriority::decl(),
     ];
 
     let body = decls

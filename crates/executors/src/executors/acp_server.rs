@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use derivative::Derivative;
@@ -6,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use ts_rs::TS;
-use workspace_utils::msg_store::MsgStore;
+use workspace_utils::{assets::asset_dir, msg_store::MsgStore};
 
 use crate::{
     approvals::ExecutorApprovalService,
@@ -17,7 +21,7 @@ use crate::{
         acp::{
             AcpAgentHarnessV2,
             discovery::{self, DiscoverySpec},
-            registry,
+            mcp, registry,
             registry::{npx_command, registry_key},
             session_config::DesiredConfig,
         },
@@ -69,12 +73,7 @@ impl StandardCodingAgentExecutor for AcpServer {
 
         let command = command.build_initial()?;
 
-        AcpAgentHarnessV2::new()
-            .with_discovery_key(discovery::cache_key(
-                &registry_key(&self.registry_id),
-                &self.key_input(),
-            ))
-            .with_config(self.desired_config())
+        self.session_harness()
             .spawn_with_command(
                 current_dir,
                 combined_prompt,
@@ -98,12 +97,7 @@ impl StandardCodingAgentExecutor for AcpServer {
 
         let command = command.build_follow_up(&[])?;
 
-        AcpAgentHarnessV2::new()
-            .with_discovery_key(discovery::cache_key(
-                &registry_key(&self.registry_id),
-                &self.key_input(),
-            ))
-            .with_config(self.desired_config())
+        self.session_harness()
             .spawn_follow_up_with_command(
                 current_dir,
                 combined_prompt,
@@ -116,8 +110,8 @@ impl StandardCodingAgentExecutor for AcpServer {
             .await
     }
 
-    fn default_mcp_config_path(&self) -> Option<std::path::PathBuf> {
-        None
+    fn default_mcp_config_path(&self) -> Option<PathBuf> {
+        Some(mcp::config_path(&asset_dir(), &self.registry_id))
     }
 
     /// Installed means present in profiles: npx downloads the agent on first run
@@ -172,6 +166,16 @@ impl AcpServer {
             approvals: None,
             cmd: CmdOverrides::default(),
         }
+    }
+
+    fn session_harness(&self) -> AcpAgentHarnessV2 {
+        AcpAgentHarnessV2::new()
+            .with_discovery_key(discovery::cache_key(
+                &registry_key(&self.registry_id),
+                &self.key_input(),
+            ))
+            .with_config(self.desired_config())
+            .with_mcp_config(self.default_mcp_config_path())
     }
 
     /// Unset permission means Ask, matching the preset.

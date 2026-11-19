@@ -13,8 +13,7 @@ use codex_app_server_protocol::{
     ItemStartedNotification as AppItemStartedNotification, JSONRPCNotification, JSONRPCRequest,
     JSONRPCResponse, McpToolCallProgressNotification, McpToolCallStatus as AppMcpToolCallStatus,
     PatchApplyStatus as AppPatchApplyStatus, ServerNotification, ServerRequest, ThreadForkResponse,
-    ThreadItem as AppThreadItem, ThreadStartResponse, ThreadTokenUsageUpdatedNotification,
-    ToolRequestUserInputQuestion,
+    ThreadItem as AppThreadItem, ThreadStartResponse, ToolRequestUserInputQuestion,
 };
 use codex_protocol::{
     dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem,
@@ -48,8 +47,9 @@ use crate::{
     approvals::ToolCallMetadata,
     logs::{
         ActionType, AnsweredQuestion, AskUserQuestionItem, AskUserQuestionOption,
-        CommandExitStatus, CommandRunResult, FileChange, NormalizedEntry, NormalizedEntryError,
-        NormalizedEntryType, TodoItem, ToolResult, ToolResultValueType, ToolStatus,
+        CommandExitStatus, CommandRunResult, ExecutionTokenUsage, FileChange, NormalizedEntry,
+        NormalizedEntryError, NormalizedEntryType, TodoItem, TokenUsageInfo, ToolResult,
+        ToolResultValueType, ToolStatus,
         plain_text_processor::PlainTextLogProcessor,
         utils::{
             ConversationPatch, EntryIndexProvider,
@@ -738,34 +738,39 @@ fn upsert_dynamic_tool_state(
     replace_normalized_entry(msg_store, index, dynamic_tool_state.to_normalized_entry());
 }
 
-fn add_thread_token_usage(
-    notification: ThreadTokenUsageUpdatedNotification,
-    msg_store: &Arc<MsgStore>,
-    entry_index: &EntryIndexProvider,
-) {
-    add_normalized_entry(
-        msg_store,
-        entry_index,
-        NormalizedEntry {
-            timestamp: None,
-            entry_type: NormalizedEntryType::TokenUsageInfo(crate::logs::TokenUsageInfo {
-                total_tokens: notification.token_usage.last.total_tokens as u32,
-                model_context_window: notification
-                    .token_usage
-                    .model_context_window
-                    .unwrap_or_default() as u32,
-            }),
-            content: format!(
-                "Tokens used: {} / Context window: {}",
-                notification.token_usage.last.total_tokens,
-                notification
-                    .token_usage
-                    .model_context_window
-                    .unwrap_or_default()
-            ),
-            metadata: None,
-        },
-    );
+fn codex_usage_entry(
+    context_used: i64,
+    context_window: Option<i64>,
+    input: i64,
+    cached_input: i64,
+    output: i64,
+) -> NormalizedEntry {
+    let total_tokens = context_used.clamp(0, i64::from(u32::MAX)) as u32;
+    let model_context_window = context_window
+        .unwrap_or_default()
+        .clamp(0, i64::from(u32::MAX)) as u32;
+    let input = input.max(0) as u64;
+    let cached_input = cached_input.max(0) as u64;
+    let output = output.max(0) as u64;
+    // A context overflow can publish synthetic totals with no token breakdown.
+    let billing = (input != 0 || cached_input != 0 || output != 0).then(|| ExecutionTokenUsage {
+        // Thread totals can span models and the usage payload supplies no model.
+        input_tokens: input.saturating_sub(cached_input),
+        output_tokens: output,
+        cache_read_tokens: cached_input,
+        cumulative: true,
+        ..Default::default()
+    });
+    NormalizedEntry {
+        timestamp: None,
+        entry_type: NormalizedEntryType::TokenUsageInfo(TokenUsageInfo {
+            total_tokens,
+            model_context_window,
+            billing,
+        }),
+        content: format!("Tokens used: {total_tokens} / Context window: {model_context_window}"),
+        metadata: None,
+    }
 }
 
 trait QuestionLike {
@@ -1300,7 +1305,18 @@ fn handle_direct_notification(
             true
         }
         ServerNotification::ThreadTokenUsageUpdated(notification) => {
-            add_thread_token_usage(notification, msg_store, entry_index);
+            let usage = notification.token_usage;
+            add_normalized_entry(
+                msg_store,
+                entry_index,
+                codex_usage_entry(
+                    usage.last.total_tokens,
+                    usage.model_context_window,
+                    usage.total.input_tokens,
+                    usage.total.cached_input_tokens,
+                    usage.total.output_tokens,
+                ),
+            );
             true
         }
         ServerNotification::AgentMessageDelta(notification) => {
@@ -2294,24 +2310,13 @@ pub fn normalize_logs(
                         add_normalized_entry(
                             &msg_store,
                             &entry_index,
-                            NormalizedEntry {
-                                timestamp: None,
-                                entry_type: NormalizedEntryType::TokenUsageInfo(
-                                    crate::logs::TokenUsageInfo {
-                                        total_tokens: info.last_token_usage.total_tokens as u32,
-                                        model_context_window: info
-                                            .model_context_window
-                                            .unwrap_or_default()
-                                            as u32,
-                                    },
-                                ),
-                                content: format!(
-                                    "Tokens used: {} / Context window: {}",
-                                    info.last_token_usage.total_tokens,
-                                    info.model_context_window.unwrap_or_default()
-                                ),
-                                metadata: None,
-                            },
+                            codex_usage_entry(
+                                info.last_token_usage.total_tokens,
+                                info.model_context_window,
+                                info.total_token_usage.input_tokens,
+                                info.total_token_usage.cached_input_tokens,
+                                info.total_token_usage.output_tokens,
+                            ),
                         );
                     }
                 }
@@ -2777,6 +2782,79 @@ mod tests {
         }
 
         latest_normalized_entries(&msg_store)
+    }
+
+    #[tokio::test]
+    async fn codex_thread_usage_preserves_context_and_cumulative_breakdown() {
+        let entries = normalize_lines(&[json!({
+            "method": "thread/tokenUsage/updated",
+            "params": {
+                "threadId": "thread", "turnId": "turn",
+                "tokenUsage": {
+                    "last": {"totalTokens": 20, "inputTokens": 18, "cachedInputTokens": 5,
+                            "outputTokens": 2, "reasoningOutputTokens": 1},
+                    "total": {"totalTokens": i64::from(u32::MAX) + 101, "inputTokens": i64::from(u32::MAX) + 1,
+                              "cachedInputTokens": 40, "outputTokens": 100, "reasoningOutputTokens": 50},
+                    "modelContextWindow": 200000
+                }
+            }
+        }).to_string()]).await;
+        let NormalizedEntryType::TokenUsageInfo(usage) = &entries[0].entry_type else {
+            panic!("expected a usage entry");
+        };
+        assert_eq!(
+            (usage.total_tokens, usage.model_context_window),
+            (20, 200_000)
+        );
+        assert_eq!(
+            usage.billing,
+            Some(ExecutionTokenUsage {
+                input_tokens: u64::from(u32::MAX) - 39,
+                output_tokens: 100,
+                cache_read_tokens: 40,
+                cumulative: true,
+                ..Default::default()
+            })
+        );
+        let synthetic = codex_usage_entry(200_000, Some(200_000), 0, 0, 0);
+        assert!(matches!(
+            synthetic.entry_type,
+            NormalizedEntryType::TokenUsageInfo(TokenUsageInfo { billing: None, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn codex_legacy_token_count_maps_the_same_breakdown() {
+        let entries = normalize_lines(&[json!({
+            "method": "codex/event/token_count",
+            "params": {"msg": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {"total_tokens": 20, "input_tokens": 18, "cached_input_tokens": 5,
+                                         "output_tokens": 2, "reasoning_output_tokens": 1},
+                    "total_token_usage": {"total_tokens": 140, "input_tokens": 120, "cached_input_tokens": 40,
+                                          "output_tokens": 20, "reasoning_output_tokens": 10},
+                    "model_context_window": 200000
+                }
+            }}
+        }).to_string()]).await;
+        let NormalizedEntryType::TokenUsageInfo(usage) = &entries[0].entry_type else {
+            panic!("expected a usage entry");
+        };
+        assert_eq!(
+            (usage.total_tokens, usage.model_context_window),
+            (20, 200_000)
+        );
+        assert_eq!(
+            usage.billing,
+            Some(ExecutionTokenUsage {
+                input_tokens: 80,
+                output_tokens: 20,
+                cache_read_tokens: 40,
+                cumulative: true,
+                ..Default::default()
+            })
+        );
     }
 
     fn tool_use<'a>(entries: &'a [NormalizedEntry], tool_name: &str) -> &'a NormalizedEntry {

@@ -171,6 +171,7 @@ pub async fn initialize_deployment(
         .backfill_repo_names()
         .await
         .map_err(DeploymentError::from)?;
+    deployment.container().start_execution_scheduler();
     deployment
         .track_if_analytics_allowed("session_start", serde_json::json!({}))
         .await;

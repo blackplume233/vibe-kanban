@@ -17,8 +17,9 @@ use db::{
             ExecutionContext, ExecutionProcess, ExecutionProcessRunReason, ExecutionProcessStatus,
         },
         execution_process_repo_state::ExecutionProcessRepoState,
+        execution_queue::{ScheduledExecution, StoredFollowUp},
         repo::Repo,
-        scratch::{DraftFollowUpData, Scratch, ScratchType},
+        scratch::{Scratch, ScratchType},
         session::{Session, SessionError},
         workspace::Workspace,
         workspace_repo::WorkspaceRepo,
@@ -44,13 +45,17 @@ use services::services::{
     config::{Config, DEFAULT_COMMIT_REMINDER_PROMPT},
     container::{ContainerError, ContainerRef, ContainerService},
     diff_stream::{self, DiffStreamHandle},
+    execution_process,
     file::FileService,
     notification::NotificationService,
     queued_message::QueuedMessageService,
     remote_client::RemoteClient,
     remote_sync,
 };
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::{
+    sync::{Mutex, RwLock, oneshot},
+    task::JoinHandle,
+};
 use tokio_util::io::ReaderStream;
 use utils::{
     log_msg::LogMsg,
@@ -64,6 +69,29 @@ use crate::{command, copy};
 
 const WORKSPACE_TOUCH_DEBOUNCE: Duration = Duration::from_mins(2);
 
+struct ExecutionLogs {
+    store: Arc<MsgStore>,
+    forwarder: JoinHandle<()>,
+    normalizers: Vec<JoinHandle<()>>,
+    normalized: oneshot::Sender<()>,
+    persistence: JoinHandle<()>,
+}
+
+impl ExecutionLogs {
+    async fn finish(self) {
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.forwarder).await;
+        self.store.push_finished();
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            for worker in self.normalizers {
+                let _ = worker.await;
+            }
+        })
+        .await;
+        let _ = self.normalized.send(());
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.persistence).await;
+    }
+}
+
 #[derive(Clone)]
 pub struct LocalContainerService {
     db: DBService,
@@ -71,9 +99,6 @@ pub struct LocalContainerService {
     child_store: Arc<RwLock<HashMap<Uuid, Arc<RwLock<AsyncGroupChild>>>>>,
     cancellation_tokens: Arc<RwLock<HashMap<Uuid, CancellationToken>>>,
     msg_stores: Arc<RwLock<HashMap<Uuid, Arc<MsgStore>>>>,
-    /// Tracks background tasks that stream logs to the database.
-    /// When stopping execution, we await these to ensure logs are fully persisted.
-    db_stream_handles: Arc<RwLock<HashMap<Uuid, JoinHandle<()>>>>,
     exit_monitor_handles: Arc<RwLock<HashMap<Uuid, JoinHandle<()>>>>,
     workspace_touch_times: Arc<RwLock<HashMap<Uuid, Instant>>>,
     config: Arc<RwLock<Config>>,
@@ -82,6 +107,8 @@ pub struct LocalContainerService {
     analytics: Option<AnalyticsContext>,
     approvals: Approvals,
     queued_message_service: QueuedMessageService,
+    scheduler_lock: Arc<Mutex<()>>,
+    shutdown: CancellationToken,
     notification_service: NotificationService,
     remote_client: Option<RemoteClient>,
 }
@@ -102,7 +129,6 @@ impl LocalContainerService {
     ) -> Self {
         let child_store = Arc::new(RwLock::new(HashMap::new()));
         let cancellation_tokens = Arc::new(RwLock::new(HashMap::new()));
-        let db_stream_handles = Arc::new(RwLock::new(HashMap::new()));
         let exit_monitor_handles = Arc::new(RwLock::new(HashMap::new()));
         let workspace_touch_times = Arc::new(RwLock::new(HashMap::new()));
         let notification_service = NotificationService::new(config.clone());
@@ -113,7 +139,6 @@ impl LocalContainerService {
             child_store,
             cancellation_tokens,
             msg_stores,
-            db_stream_handles,
             exit_monitor_handles,
             workspace_touch_times,
             config,
@@ -122,6 +147,8 @@ impl LocalContainerService {
             analytics,
             approvals,
             queued_message_service,
+            scheduler_lock: Arc::new(Mutex::new(())),
+            shutdown: CancellationToken::new(),
             notification_service,
             remote_client,
         };
@@ -202,11 +229,6 @@ impl LocalContainerService {
         map.insert(id, Arc::new(RwLock::new(exec)));
     }
 
-    async fn remove_child_from_store(&self, id: &Uuid) {
-        let mut map = self.child_store.write().await;
-        map.remove(id);
-    }
-
     async fn add_cancellation_token(&self, id: Uuid, token: CancellationToken) {
         let mut map = self.cancellation_tokens.write().await;
         map.insert(id, token);
@@ -214,16 +236,6 @@ impl LocalContainerService {
 
     async fn take_cancellation_token(&self, id: &Uuid) -> Option<CancellationToken> {
         let mut map = self.cancellation_tokens.write().await;
-        map.remove(id)
-    }
-
-    async fn add_db_stream_handle(&self, id: Uuid, handle: JoinHandle<()>) {
-        let mut map = self.db_stream_handles.write().await;
-        map.insert(id, handle);
-    }
-
-    async fn take_db_stream_handle(&self, id: &Uuid) -> Option<JoinHandle<()>> {
-        let mut map = self.db_stream_handles.write().await;
         map.remove(id)
     }
 
@@ -480,6 +492,7 @@ impl LocalContainerService {
         &self,
         exec_id: &Uuid,
         exit_signal: Option<ExecutorExitSignal>,
+        logs: ExecutionLogs,
     ) -> JoinHandle<()> {
         let exec_id = *exec_id;
         let child_store = self.child_store.clone();
@@ -537,6 +550,8 @@ impl LocalContainerService {
                 }
                 Err(_) => (None, ExecutionProcessStatus::Failed),
             };
+
+            logs.finish().await;
 
             if !ExecutionProcess::was_stopped(&db.pool, exec_id).await
                 && let Err(e) =
@@ -602,8 +617,14 @@ impl LocalContainerService {
                             ctx.workspace.id
                         );
 
-                        // Manually finalize task since we're bypassing normal execution flow
-                        container.finalize_task(&ctx).await;
+                        match container.consume_follow_up(&ctx, true).await {
+                            Ok(true) => {}
+                            Ok(false) => container.finalize_task(&ctx).await,
+                            Err(err) => {
+                                tracing::error!(%err, "Failed to start queued follow-up");
+                                container.finalize_task(&ctx).await;
+                            }
+                        }
                         already_finalized = true;
                     }
                 }
@@ -624,51 +645,16 @@ impl LocalContainerService {
                         ExecutionProcessStatus::Failed | ExecutionProcessStatus::Killed
                     );
 
-                    if let Some(queued_msg) =
-                        container.queued_message_service.take_queued(ctx.session.id)
+                    match container
+                        .consume_follow_up(&ctx, should_execute_queued)
+                        .await
                     {
-                        if should_execute_queued {
-                            tracing::info!(
-                                "Found queued message for session {}, starting follow-up execution",
-                                ctx.session.id
-                            );
-
-                            // Delete the scratch since we're consuming the queued message
-                            if let Err(e) = Scratch::delete(
-                                &db.pool,
-                                ctx.session.id,
-                                &ScratchType::DraftFollowUp,
-                            )
-                            .await
-                            {
-                                tracing::warn!(
-                                    "Failed to delete scratch after consuming queued message: {}",
-                                    e
-                                );
-                            }
-
-                            // Execute the queued follow-up
-                            if let Err(e) = container
-                                .start_queued_follow_up(&ctx, &queued_msg.data)
-                                .await
-                            {
-                                tracing::error!("Failed to start queued follow-up: {}", e);
-                                // Fall back to finalization if follow-up fails
-                                container.finalize_task(&ctx).await;
-                            } else {
-                                started_queued_follow_up = true;
-                            }
-                        } else {
-                            // Execution failed or was killed - discard the queued message and finalize
-                            tracing::info!(
-                                "Discarding queued message for session {} due to execution status {:?}",
-                                ctx.session.id,
-                                ctx.execution_process.status
-                            );
+                        Ok(true) => started_queued_follow_up = true,
+                        Ok(false) => container.finalize_task(&ctx).await,
+                        Err(err) => {
+                            tracing::error!(%err, "Failed to start queued follow-up");
                             container.finalize_task(&ctx).await;
                         }
-                    } else {
-                        container.finalize_task(&ctx).await;
                     }
 
                     let should_mark_turn_unseen = matches!(
@@ -707,33 +693,9 @@ impl LocalContainerService {
                     .unwrap_or(true);
 
                     if !has_running_agent
-                        && let Some(queued_msg) =
-                            container.queued_message_service.take_queued(ctx.session.id)
+                        && let Err(err) = container.consume_follow_up(&ctx, true).await
                     {
-                        tracing::info!(
-                            "Parallel setup script finished with queued message for session {}, starting follow-up",
-                            ctx.session.id
-                        );
-
-                        if let Err(e) =
-                            Scratch::delete(&db.pool, ctx.session.id, &ScratchType::DraftFollowUp)
-                                .await
-                        {
-                            tracing::warn!(
-                                "Failed to delete scratch after consuming queued message: {}",
-                                e
-                            );
-                        }
-
-                        if let Err(e) = container
-                            .start_queued_follow_up(&ctx, &queued_msg.data)
-                            .await
-                        {
-                            tracing::error!(
-                                "Failed to start queued follow-up from setup script completion: {}",
-                                e
-                            );
-                        }
+                        tracing::error!(%err, "Failed to start queued follow-up after setup");
                     }
                 }
 
@@ -791,14 +753,7 @@ impl LocalContainerService {
             // capture the HEAD OID as the definitive "after" state (best-effort).
             container.update_after_head_commits(exec_id).await;
 
-            // Wait for DB persistence to complete before cleaning up MsgStore
-            let db_stream_handle = container.take_db_stream_handle(&exec_id).await;
-            if let Some(msg_arc) = msg_stores.write().await.remove(&exec_id) {
-                msg_arc.push_finished();
-            }
-            if let Some(handle) = db_stream_handle {
-                let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
-            }
+            msg_stores.write().await.remove(&exec_id);
 
             // SIGKILL any orphaned children (e.g. MCP servers) still in the
             // process group. The executor itself is already done — either it
@@ -808,6 +763,13 @@ impl LocalContainerService {
                 let _ = child.start_kill();
             }
             child_store.write().await.remove(&exec_id);
+            if let Err(err) = ScheduledExecution::remove(&db.pool, exec_id).await {
+                tracing::error!(%exec_id, %err, "Failed to release execution slot");
+            }
+            container
+                .queued_message_service
+                .scheduler_changed
+                .notify_one();
         })
     }
 
@@ -853,15 +815,10 @@ impl LocalContainerService {
         format!("{}-{}", short_uuid(workspace_id), task_title_id)
     }
 
-    async fn track_child_msgs_in_store(
-        &self,
-        id: Uuid,
+    fn track_child_msgs_in_store(
+        store: Arc<MsgStore>,
         child: &mut AsyncGroupChild,
-    ) -> Result<(), ContainerError> {
-        let store = self
-            .get_msg_store_by_id(&id)
-            .await
-            .ok_or_else(|| ContainerError::Other(anyhow!("MsgStore not found for execution")))?;
+    ) -> JoinHandle<()> {
         let out = child.inner().stdout.take().expect("no stdout");
         let err = child.inner().stderr.take().expect("no stderr");
 
@@ -877,8 +834,7 @@ impl LocalContainerService {
 
         // Merge and forward into the store
         let merged = select(out, err); // Stream<Item = Result<LogMsg, io::Error>>
-        store.clone().spawn_forwarder(merged);
-        Ok(())
+        store.spawn_forwarder(merged)
     }
 
     /// Create a live diff log stream for ongoing attempts for WebSocket
@@ -1043,12 +999,68 @@ impl LocalContainerService {
         Ok(())
     }
 
+    async fn consume_follow_up(
+        &self,
+        ctx: &ExecutionContext,
+        execute: bool,
+    ) -> Result<bool, ContainerError> {
+        if self.shutdown.is_cancelled() {
+            return Ok(false);
+        }
+        let session_id = ctx.session.id;
+        if !execute {
+            self.queued_message_service
+                .cancel_queued(session_id)
+                .await?;
+            return Ok(false);
+        }
+        let Some(draft) = StoredFollowUp::get(&self.db.pool, session_id).await? else {
+            return Ok(false);
+        };
+        self.start_queued_follow_up(ctx, draft).await
+    }
+
+    async fn dispatch_pending(&self) -> Result<(), ContainerError> {
+        while !self.shutdown.is_cancelled() {
+            let _admission = self.scheduler_lock.lock().await;
+            let Some(id) = ScheduledExecution::next(&self.db.pool).await? else {
+                break;
+            };
+            let ctx = ExecutionProcess::load_context(&self.db.pool, id).await?;
+            ScheduledExecution::claim(&self.db.pool, id).await?;
+            let result = match ctx.execution_process.executor_action() {
+                Ok(action) => {
+                    self.launch_execution(&ctx.workspace, &ctx.execution_process, action)
+                        .await
+                }
+                Err(err) => Err(err.into()),
+            };
+            if let Err(err) = result {
+                self.execution_start_failed(&ctx.execution_process, &err)
+                    .await;
+                ScheduledExecution::remove(&self.db.pool, id).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn recover_follow_ups(&self) -> Result<(), ContainerError> {
+        for (_, process_id) in StoredFollowUp::recoverable(&self.db.pool).await? {
+            let ctx = ExecutionProcess::load_context(&self.db.pool, process_id).await?;
+            if let Err(err) = self.consume_follow_up(&ctx, true).await {
+                tracing::error!(%process_id, %err, "Failed to recover queued follow-up");
+            }
+        }
+        Ok(())
+    }
+
     /// Start a follow-up execution from a queued message
     async fn start_queued_follow_up(
         &self,
         ctx: &ExecutionContext,
-        queued_data: &DraftFollowUpData,
-    ) -> Result<ExecutionProcess, ContainerError> {
+        draft: StoredFollowUp,
+    ) -> Result<bool, ContainerError> {
+        let queued_data = &draft.payload.0;
         let executor_profile_id = queued_data.executor_config.profile_id();
 
         // Validate executor matches session if session has prior executions
@@ -1107,13 +1119,41 @@ impl LocalContainerService {
 
         let action = ExecutorAction::new(action_type, cleanup_action.map(Box::new));
 
-        self.start_execution(
-            &ctx.workspace,
-            &ctx.session,
-            &action,
-            &ExecutionProcessRunReason::CodingAgent,
-        )
-        .await
+        let process = self
+            .prepare_execution(
+                &ctx.workspace,
+                &ctx.session,
+                &action,
+                &ExecutionProcessRunReason::CodingAgent,
+            )
+            .await?;
+        match ScheduledExecution::promote_follow_up(&self.db.pool, process.id, &draft).await {
+            Ok(true) => {
+                self.queued_message_service.scheduler_changed.notify_one();
+                if let Err(err) =
+                    Scratch::delete(&self.db.pool, draft.session_id, &ScratchType::DraftFollowUp)
+                        .await
+                {
+                    tracing::warn!(%err, "Failed to clear the promoted follow-up's editor draft");
+                }
+                Ok(true)
+            }
+            Ok(false) => {
+                ExecutionProcess::update_completion(
+                    &self.db.pool,
+                    process.id,
+                    ExecutionProcessStatus::Killed,
+                    None,
+                )
+                .await?;
+                Ok(false)
+            }
+            Err(err) => {
+                let err = err.into();
+                self.execution_start_failed(&process, &err).await;
+                Err(err)
+            }
+        }
     }
 }
 
@@ -1179,14 +1219,6 @@ impl ContainerService for LocalContainerService {
 
         Workspace::touch(&self.db.pool, workspace.id).await?;
         Ok(())
-    }
-
-    async fn store_db_stream_handle(&self, id: Uuid, handle: JoinHandle<()>) {
-        self.add_db_stream_handle(id, handle).await;
-    }
-
-    async fn take_db_stream_handle(&self, id: &Uuid) -> Option<JoinHandle<()>> {
-        LocalContainerService::take_db_stream_handle(self, id).await
     }
 
     async fn git_branch_prefix(&self) -> String {
@@ -1318,6 +1350,21 @@ impl ContainerService for LocalContainerService {
         execution_process: &ExecutionProcess,
         executor_action: &ExecutorAction,
     ) -> Result<(), ContainerError> {
+        if execution_process.run_reason == ExecutionProcessRunReason::CodingAgent {
+            ScheduledExecution::enqueue(&self.db.pool, execution_process.id).await?;
+            self.queued_message_service.scheduler_changed.notify_one();
+            return Ok(());
+        }
+        self.launch_execution(workspace, execution_process, executor_action)
+            .await
+    }
+
+    async fn launch_execution(
+        &self,
+        workspace: &Workspace,
+        execution_process: &ExecutionProcess,
+        executor_action: &ExecutorAction,
+    ) -> Result<(), ContainerError> {
         // Get the worktree path
         let container_ref = workspace
             .container_ref
@@ -1335,6 +1382,19 @@ impl ContainerService for LocalContainerService {
         );
 
         let repos = WorkspaceRepo::find_repos_for_workspace(&self.db.pool, workspace.id).await?;
+        if execution_process.run_reason == ExecutionProcessRunReason::CodingAgent {
+            for repo in &repos {
+                if let Ok(head) = self.git.get_head_info(&current_dir.join(&repo.name)) {
+                    ExecutionProcessRepoState::update_before_head_commit(
+                        &self.db.pool,
+                        execution_process.id,
+                        repo.id,
+                        &head.oid,
+                    )
+                    .await?;
+                }
+            }
+        }
         let repo_names: Vec<String> = repos.iter().map(|r| r.name.clone()).collect();
         let repo_context = RepoContext::new(current_dir.clone(), repo_names);
 
@@ -1367,13 +1427,41 @@ impl ContainerService for LocalContainerService {
             ))
         })??;
 
-        if let Err(e) = self
-            .track_child_msgs_in_store(execution_process.id, &mut spawned.child)
+        let store = Arc::new(MsgStore::new());
+        self.msg_stores
+            .write()
             .await
-        {
-            let _ = command::kill_process_group(&mut spawned.child).await;
-            return Err(e);
-        }
+            .insert(execution_process.id, store.clone());
+        let model_id = match executor_action.typ() {
+            ExecutorActionType::CodingAgentInitialRequest(request) => {
+                request.executor_config.model_id.clone()
+            }
+            ExecutorActionType::CodingAgentFollowUpRequest(request) => {
+                request.executor_config.model_id.clone()
+            }
+            ExecutorActionType::ReviewRequest(request) => request.executor_config.model_id.clone(),
+            ExecutorActionType::ScriptRequest(_) => None,
+        };
+        let (normalized, normalization_done) = oneshot::channel();
+        let persistence = execution_process::spawn_stream_raw_logs_to_storage(
+            store.get_receiver(),
+            self.db.clone(),
+            execution_process.id,
+            execution_process.session_id,
+            executor_action
+                .base_executor()
+                .map(|executor| (executor.to_string(), model_id)),
+            normalization_done,
+        );
+        let normalizers = self.normalize_execution_logs(workspace, executor_action, store.clone());
+        let forwarder = Self::track_child_msgs_in_store(store.clone(), &mut spawned.child);
+        let logs = ExecutionLogs {
+            store,
+            forwarder,
+            normalizers,
+            normalized,
+            persistence,
+        };
 
         self.add_child_to_store(execution_process.id, spawned.child)
             .await;
@@ -1385,7 +1473,7 @@ impl ContainerService for LocalContainerService {
         }
 
         // Spawn unified exit monitor: watches OS exit and optional executor signal
-        let hn = self.spawn_exit_monitor(&execution_process.id, spawned.exit_signal);
+        let hn = self.spawn_exit_monitor(&execution_process.id, spawned.exit_signal, logs);
         self.add_exit_monitor_handle(execution_process.id, hn).await;
 
         Ok(())
@@ -1396,39 +1484,36 @@ impl ContainerService for LocalContainerService {
         execution_process: &ExecutionProcess,
         status: ExecutionProcessStatus,
     ) -> Result<(), ContainerError> {
-        let child = self
-            .get_child_from_store(&execution_process.id)
-            .await
-            .ok_or_else(|| {
-                ContainerError::Other(anyhow!("Child process not found for execution"))
-            })?;
+        let admission = self.scheduler_lock.lock().await;
+        let id = execution_process.id;
         let exit_code = if status == ExecutionProcessStatus::Completed {
             Some(0)
         } else {
             None
         };
+        if ScheduledExecution::is_waiting(&self.db.pool, id).await? {
+            ExecutionProcess::update_completion(&self.db.pool, id, status, exit_code).await?;
+            ScheduledExecution::remove(&self.db.pool, id).await?;
+            self.queued_message_service.scheduler_changed.notify_one();
+            return Ok(());
+        }
+        let child = self.get_child_from_store(&id).await.ok_or_else(|| {
+            ContainerError::Other(anyhow!("Child process not found for execution"))
+        })?;
 
         ExecutionProcess::update_completion(&self.db.pool, execution_process.id, status, exit_code)
             .await?;
+        drop(admission);
 
-        // Try graceful cancellation first, then force kill
-        if let Some(cancel) = self.take_cancellation_token(&execution_process.id).await {
+        let mut monitor = self.take_exit_monitor_handle(&id).await;
+        if let Some(cancel) = self.take_cancellation_token(&id).await {
             cancel.cancel();
-
-            // Wait for exit monitor to finish gracefully
-            if let Some(monitor_handle) = self.take_exit_monitor_handle(&execution_process.id).await
+            if let Some(handle) = &mut monitor
+                && tokio::time::timeout(Duration::from_secs(5), handle)
+                    .await
+                    .is_ok()
             {
-                match tokio::time::timeout(Duration::from_secs(5), monitor_handle).await {
-                    Ok(_) => {
-                        tracing::debug!("Process {} exited gracefully", execution_process.id);
-                    }
-                    Err(_) => {
-                        tracing::debug!(
-                            "Graceful shutdown timed out for process {}, force killing",
-                            execution_process.id
-                        );
-                    }
-                }
+                return Ok(());
             }
         }
 
@@ -1443,24 +1528,9 @@ impl ContainerService for LocalContainerService {
                 return Err(e);
             }
         }
-        self.remove_child_from_store(&execution_process.id).await;
-
-        // Mark the process finished in the MsgStore and wait for DB persistence
-        let db_stream_handle = self.take_db_stream_handle(&execution_process.id).await;
-        if let Some(msg) = self.msg_stores.write().await.remove(&execution_process.id) {
-            msg.push_finished();
+        if let Some(handle) = monitor {
+            let _ = tokio::time::timeout(Duration::from_secs(15), handle).await;
         }
-        if let Some(handle) = db_stream_handle {
-            let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
-        }
-
-        tracing::debug!(
-            "Execution process {} stopped successfully",
-            execution_process.id
-        );
-
-        // Record after-head commit OID (best-effort)
-        self.update_after_head_commits(execution_process.id).await;
 
         Ok(())
     }
@@ -1589,9 +1659,34 @@ impl ContainerService for LocalContainerService {
         .map_err(|e| ContainerError::Other(anyhow!("Copy files task failed: {e}")))?
     }
 
+    fn start_execution_scheduler(&self) {
+        let container = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = ScheduledExecution::clear_orphan_slots(&container.db.pool).await {
+                tracing::error!(%err, "Failed to clear orphaned scheduler slots");
+            }
+            if let Err(err) = container.recover_follow_ups().await {
+                tracing::error!(%err, "Failed to recover follow-up drafts");
+            }
+            loop {
+                if let Err(err) = container.dispatch_pending().await {
+                    tracing::error!(%err, "Failed to dispatch the execution queue");
+                }
+                tokio::select! {
+                    _ = container.shutdown.cancelled() => break,
+                    _ = container.queued_message_service.scheduler_changed.notified() => {}
+                }
+            }
+        });
+    }
+
     async fn kill_all_running_processes(&self) -> Result<(), ContainerError> {
+        self.shutdown.cancel();
+        let running_processes = {
+            let _admission = self.scheduler_lock.lock().await;
+            ExecutionProcess::find_running(&self.db.pool).await?
+        };
         tracing::info!("Killing all running processes");
-        let running_processes = ExecutionProcess::find_running(&self.db.pool).await?;
 
         tracing::info!(
             "Found {} running processes to kill",
@@ -1599,6 +1694,9 @@ impl ContainerService for LocalContainerService {
         );
 
         for process in running_processes {
+            if ScheduledExecution::is_waiting(&self.db.pool, process.id).await? {
+                continue;
+            }
             tracing::info!(
                 "Killing process: id={}, run_reason={:?}",
                 process.id,

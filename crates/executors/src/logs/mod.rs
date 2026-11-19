@@ -111,8 +111,32 @@ pub struct AnsweredQuestion {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TokenUsageInfo {
+    /// Occupancy of the model context, independent of provider billing.
     pub total_tokens: u32,
     pub model_context_window: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub billing: Option<ExecutionTokenUsage>,
+}
+
+/// Provider-reported usage. A missing breakdown field is represented by zero.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+pub struct ExecutionTokenUsage {
+    pub model: Option<String>,
+    #[ts(type = "number")]
+    pub input_tokens: u64,
+    #[ts(type = "number")]
+    pub output_tokens: u64,
+    #[ts(type = "number")]
+    pub cache_read_tokens: u64,
+    #[ts(type = "number")]
+    pub cache_write_tokens: u64,
+    /// The provider's reported USD cost, which can be an estimate.
+    pub cost_usd: Option<f64>,
+    /// True for a session/thread snapshot that can include earlier executions.
+    /// Compare snapshots of the same session to derive deltas; never sum them.
+    /// False for a discrete invocation or message that can be counted once.
+    pub cumulative: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

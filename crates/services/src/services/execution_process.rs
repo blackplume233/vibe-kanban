@@ -9,13 +9,20 @@ use db::{
     DBService,
     models::{
         coding_agent_turn::CodingAgentTurn, execution_process::ExecutionProcess,
-        execution_process_logs::ExecutionProcessLogs,
+        execution_process_logs::ExecutionProcessLogs, execution_usage::ExecutionUsage,
     },
 };
+use executors::logs::ExecutionTokenUsage;
 use futures::{StreamExt, TryStreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use json_patch::{Patch, PatchOperation};
+use serde::Deserialize;
 use sqlx::SqlitePool;
-use tokio::{io::AsyncWriteExt, sync::RwLock, task::JoinHandle};
+use tokio::{
+    io::AsyncWriteExt,
+    sync::{broadcast, oneshot},
+    task::JoinHandle,
+};
 use utils::{
     assets::prod_asset_dir_path,
     execution_logs::{
@@ -23,7 +30,6 @@ use utils::{
         read_execution_log_file,
     },
     log_msg::LogMsg,
-    msg_store::MsgStore,
 };
 use uuid::Uuid;
 
@@ -252,98 +258,177 @@ pub async fn append_log_message(session_id: Uuid, execution_id: Uuid, msg: &LogM
 }
 
 pub fn spawn_stream_raw_logs_to_storage(
-    msg_stores: Arc<RwLock<HashMap<Uuid, Arc<MsgStore>>>>,
+    mut receiver: broadcast::Receiver<LogMsg>,
     db: DBService,
     execution_id: Uuid,
     session_id: Uuid,
+    executor: Option<(String, Option<String>)>,
+    mut normalization_done: oneshot::Receiver<()>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut log_writer =
             match ExecutionLogWriter::new_for_execution(session_id, execution_id).await {
-                Ok(w) => w,
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to create log file writer for execution {}: {}",
-                        execution_id,
-                        e
-                    );
-                    return;
+                Ok(writer) => Some(writer),
+                Err(err) => {
+                    tracing::error!(%execution_id, %err, "Failed to create execution log writer");
+                    None
                 }
             };
+        let mut provider_session = None;
+        let mut snapshots = HashMap::new();
+        loop {
+            let msg = tokio::select! {
+                biased;
+                result = receiver.recv() => match result {
+                    Ok(msg) => msg,
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        tracing::error!(%execution_id, count, "Execution log subscriber lagged");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                _ = &mut normalization_done => break,
+            };
+            match &msg {
+                LogMsg::Stdout(_) | LogMsg::Stderr(_) => match serde_json::to_string(&msg) {
+                    Ok(jsonl_line) => {
+                        let mut jsonl_line_with_newline = jsonl_line;
+                        jsonl_line_with_newline.push('\n');
 
-        let store = {
-            let map = msg_stores.read().await;
-            map.get(&execution_id).cloned()
-        };
-
-        if let Some(store) = store {
-            let mut stream = store.history_plus_stream();
-
-            while let Some(Ok(msg)) = stream.next().await {
-                match &msg {
-                    LogMsg::Stdout(_) | LogMsg::Stderr(_) => match serde_json::to_string(&msg) {
-                        Ok(jsonl_line) => {
-                            let mut jsonl_line_with_newline = jsonl_line;
-                            jsonl_line_with_newline.push('\n');
-
-                            if let Err(e) =
-                                log_writer.append_jsonl_line(&jsonl_line_with_newline).await
-                            {
-                                tracing::error!(
-                                    "Failed to append log line for execution {}: {}",
-                                    execution_id,
-                                    e
-                                );
-                            }
-                        }
-                        Err(e) => {
+                        if let Some(writer) = &mut log_writer
+                            && let Err(e) = writer.append_jsonl_line(&jsonl_line_with_newline).await
+                        {
                             tracing::error!(
-                                "Failed to serialize log message for execution {}: {}",
+                                "Failed to append log line for execution {}: {}",
                                 execution_id,
                                 e
                             );
                         }
-                    },
-                    LogMsg::SessionId(agent_session_id) => {
-                        if let Err(e) = CodingAgentTurn::update_agent_session_id(
-                            &db.pool,
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to serialize log message for execution {}: {}",
                             execution_id,
+                            e
+                        );
+                    }
+                },
+                LogMsg::SessionId(agent_session_id) => {
+                    provider_session = Some(agent_session_id.to_owned());
+                    if let Err(e) = CodingAgentTurn::update_agent_session_id(
+                        &db.pool,
+                        execution_id,
+                        agent_session_id,
+                    )
+                    .await
+                    {
+                        tracing::error!(
+                            "Failed to update agent_session_id {} for execution process {}: {}",
                             agent_session_id,
-                        )
-                        .await
-                        {
-                            tracing::error!(
-                                "Failed to update agent_session_id {} for execution process {}: {}",
-                                agent_session_id,
-                                execution_id,
-                                e
-                            );
-                        }
+                            execution_id,
+                            e
+                        );
                     }
-                    LogMsg::MessageId(agent_message_id) => {
-                        if let Err(e) = CodingAgentTurn::update_agent_message_id(
+                }
+                LogMsg::MessageId(agent_message_id) => {
+                    if let Err(e) = CodingAgentTurn::update_agent_message_id(
+                        &db.pool,
+                        execution_id,
+                        agent_message_id,
+                    )
+                    .await
+                    {
+                        tracing::error!(
+                            "Failed to update agent_message_id {} for execution process {}: {}",
+                            agent_message_id,
+                            execution_id,
+                            e
+                        );
+                    }
+                }
+                LogMsg::JsonPatch(patch) => {
+                    if let Some((executor, model)) = &executor
+                        && let Some(usage) = billing_from_patch(patch)
+                    {
+                        if usage.cumulative {
+                            snapshots.insert(usage.model.clone(), usage);
+                        } else if let Err(err) = record_usage(
                             &db.pool,
                             execution_id,
-                            agent_message_id,
+                            session_id,
+                            executor,
+                            model.as_deref(),
+                            None,
+                            &usage,
                         )
                         .await
                         {
-                            tracing::error!(
-                                "Failed to update agent_message_id {} for execution process {}: {}",
-                                agent_message_id,
-                                execution_id,
-                                e
-                            );
+                            tracing::error!(%execution_id, %err, "Failed to record execution usage");
                         }
                     }
-                    LogMsg::Finished => {
-                        break;
-                    }
-                    LogMsg::JsonPatch(_) | LogMsg::Ready => continue,
+                }
+                LogMsg::Finished | LogMsg::Ready => {}
+            }
+        }
+        if let Some((executor, model)) = executor {
+            for usage in snapshots.values() {
+                if let Err(err) = record_usage(
+                    &db.pool,
+                    execution_id,
+                    session_id,
+                    &executor,
+                    model.as_deref(),
+                    provider_session.as_deref(),
+                    usage,
+                )
+                .await
+                {
+                    tracing::error!(%execution_id, %err, "Failed to record cumulative execution usage");
                 }
             }
         }
     })
+}
+
+fn billing_from_patch(patch: &Patch) -> Option<ExecutionTokenUsage> {
+    let value = match patch.0.first()? {
+        PatchOperation::Add(op) => &op.value,
+        PatchOperation::Replace(op) => &op.value,
+        _ => return None,
+    };
+    let entry = value.get("content")?.get("entry_type")?;
+    if entry.get("type")?.as_str()? != "token_usage_info" {
+        return None;
+    }
+    ExecutionTokenUsage::deserialize(entry.get("billing")?).ok()
+}
+
+async fn record_usage(
+    pool: &SqlitePool,
+    execution_id: Uuid,
+    session_id: Uuid,
+    executor: &str,
+    model: Option<&str>,
+    provider_session: Option<&str>,
+    usage: &ExecutionTokenUsage,
+) -> Result<(), sqlx::Error> {
+    let to_i64 = |count: u64| i64::try_from(count).unwrap_or(i64::MAX);
+    let record = ExecutionUsage {
+        execution_process_id: execution_id,
+        session_id,
+        executor,
+        model: usage.model.as_deref().or(model),
+        input_tokens: to_i64(usage.input_tokens),
+        output_tokens: to_i64(usage.output_tokens),
+        cache_read_tokens: to_i64(usage.cache_read_tokens),
+        cache_write_tokens: to_i64(usage.cache_write_tokens),
+        cost_usd: usage.cost_usd,
+    };
+    if let Some(provider_session) = provider_session {
+        record.record_snapshot(pool, provider_session, usage).await
+    } else {
+        record.record(pool).await
+    }
 }
 
 async fn read_execution_logs_for_execution(

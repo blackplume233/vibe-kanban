@@ -42,8 +42,9 @@ use crate::{
         StandardCodingAgentExecutor, codex::client::LogWriter, utils::reorder_slash_commands,
     },
     logs::{
-        ActionType, AnsweredQuestion, AskUserQuestionItem, AskUserQuestionOption, FileChange,
-        NormalizedEntry, NormalizedEntryError, NormalizedEntryType, TodoItem, ToolStatus,
+        ActionType, AnsweredQuestion, AskUserQuestionItem, AskUserQuestionOption,
+        ExecutionTokenUsage, FileChange, NormalizedEntry, NormalizedEntryError,
+        NormalizedEntryType, TodoItem, ToolStatus,
         plain_text_processor::PlainTextLogProcessor,
         utils::{
             EntryIndexProvider,
@@ -742,6 +743,7 @@ pub struct ClaudeLogProcessor {
     main_model_name: Option<String>,
     main_model_context_window: u32,
     context_tokens_used: u32,
+    restores_session_usage: bool,
 }
 
 impl ClaudeLogProcessor {
@@ -761,6 +763,7 @@ impl ClaudeLogProcessor {
             last_assistant_message: None,
             main_model_context_window: DEFAULT_CLAUDE_CONTEXT_WINDOW,
             context_tokens_used: 0,
+            restores_session_usage: false,
         }
     }
 
@@ -1246,6 +1249,7 @@ impl ClaudeLogProcessor {
                 subtype,
                 api_key_source,
                 model,
+                claude_code_version,
                 status,
                 tool_use_id,
                 description,
@@ -1263,6 +1267,10 @@ impl ClaudeLogProcessor {
                 // keep the existing behaviour for the normal system message
                 match subtype.as_deref() {
                     Some("init") => {
+                        // Claude Code 2.1.277 began including restored usage on resume.
+                        if let Some(version) = claude_code_version {
+                            self.restores_session_usage = claude_restores_session_usage(version);
+                        }
                         if self.main_model_name.is_none() {
                             // this name matches the model names in the usage report in the result message
                             if let Some(model) = model {
@@ -1787,7 +1795,7 @@ impl ClaudeLogProcessor {
                         let total_tokens = input_tokens + output_tokens;
                         self.context_tokens_used = total_tokens as u32;
 
-                        patches.push(self.add_token_usage_entry(entry_index_provider));
+                        patches.push(self.add_token_usage_entry(entry_index_provider, None));
                     }
                 }
                 ClaudeStreamEvent::MessageStop => {
@@ -1800,19 +1808,31 @@ impl ClaudeLogProcessor {
             ClaudeJson::Result {
                 is_error,
                 model_usage,
+                usage,
+                total_cost_usd,
                 subtype,
                 result,
                 ..
             } => {
-                // get the real model context window and correct the context usage entry
-                if let Some(context_window) = model_usage.as_ref().and_then(|model_usage| {
-                    self.main_model_name
-                        .as_ref()
-                        .and_then(|name| model_usage.get(name))
-                        .and_then(|usage| usage.context_window)
-                }) {
+                // The result corrects the context window but reports billing separately.
+                let context_window = self
+                    .main_model_name
+                    .as_ref()
+                    .and_then(|name| model_usage.as_ref()?.get(name)?.context_window);
+                if let Some(context_window) = context_window {
                     self.main_model_context_window = context_window;
-                    patches.push(self.add_token_usage_entry(entry_index_provider));
+                }
+                let [whole_usage, turn_usage] = claude_result_billing(
+                    model_usage.as_ref(),
+                    usage.as_ref(),
+                    *total_cost_usd,
+                    self.restores_session_usage,
+                );
+                if context_window.is_some() || whole_usage.is_some() {
+                    patches.push(self.add_token_usage_entry(entry_index_provider, whole_usage));
+                }
+                if turn_usage.is_some() {
+                    patches.push(self.add_token_usage_entry(entry_index_provider, turn_usage));
                 }
 
                 if matches!(self.strategy, HistoryStrategy::AmpResume) && is_error.unwrap_or(false)
@@ -2064,12 +2084,14 @@ impl ClaudeLogProcessor {
     fn add_token_usage_entry(
         &mut self,
         entry_index_provider: &EntryIndexProvider,
+        billing: Option<ExecutionTokenUsage>,
     ) -> json_patch::Patch {
         let entry = NormalizedEntry {
             timestamp: None,
             entry_type: NormalizedEntryType::TokenUsageInfo(crate::logs::TokenUsageInfo {
                 total_tokens: self.context_tokens_used,
                 model_context_window: self.main_model_context_window,
+                billing,
             }),
             content: format!(
                 "Tokens used: {} / Context window: {}",
@@ -2268,6 +2290,8 @@ pub enum ClaudeJson {
         cwd: Option<String>,
         tools: Option<Vec<serde_json::Value>>,
         model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claude_code_version: Option<String>,
         #[serde(default, rename = "apiKeySource")]
         api_key_source: Option<String>,
         status: Option<String>,
@@ -2348,6 +2372,12 @@ pub enum ClaudeJson {
         model_usage: Option<HashMap<String, ClaudeModelUsage>>,
         #[serde(default)]
         usage: Option<ClaudeUsage>,
+        #[serde(
+            default,
+            alias = "totalCostUsd",
+            skip_serializing_if = "Option::is_none"
+        )]
+        total_cost_usd: Option<f64>,
     },
     ApprovalRequested {
         tool_call_id: String,
@@ -2523,6 +2553,88 @@ pub struct ClaudeUsage {
 pub struct ClaudeModelUsage {
     #[serde(default)]
     pub context_window: Option<u32>,
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_creation_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_read_input_tokens: Option<u64>,
+    #[serde(default, rename = "costUSD")]
+    pub cost_usd: Option<f64>,
+}
+
+fn claude_restores_session_usage(version: &str) -> bool {
+    let version = version.split(['-', '+']).next().unwrap_or_default();
+    let mut parts = version.split('.').map(str::parse::<u32>);
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch))) if (major, minor, patch) >= (2, 1, 277)
+    )
+}
+
+fn claude_result_billing(
+    models: Option<&HashMap<String, ClaudeModelUsage>>,
+    usage: Option<&ClaudeUsage>,
+    total_cost_usd: Option<f64>,
+    cumulative: bool,
+) -> [Option<ExecutionTokenUsage>; 2] {
+    // modelUsage includes subagents and follows the same scope as total_cost_usd.
+    // result.usage covers only the main agent's current turn.
+    let mut billing = ExecutionTokenUsage {
+        cost_usd: total_cost_usd,
+        cumulative,
+        ..Default::default()
+    };
+    if let Some(models) = models.filter(|models| !models.is_empty()) {
+        billing.model = models.keys().next().filter(|_| models.len() == 1).cloned();
+        billing.cost_usd = billing
+            .cost_usd
+            .or_else(|| models.values().map(|model| model.cost_usd).sum());
+        let mut has_model_tokens = false;
+        for usage in models.values() {
+            has_model_tokens |= usage.input_tokens.is_some()
+                || usage.output_tokens.is_some()
+                || usage.cache_read_input_tokens.is_some()
+                || usage.cache_creation_input_tokens.is_some();
+            billing.input_tokens = billing
+                .input_tokens
+                .saturating_add(usage.input_tokens.unwrap_or_default());
+            billing.output_tokens = billing
+                .output_tokens
+                .saturating_add(usage.output_tokens.unwrap_or_default());
+            billing.cache_read_tokens = billing
+                .cache_read_tokens
+                .saturating_add(usage.cache_read_input_tokens.unwrap_or_default());
+            billing.cache_write_tokens = billing
+                .cache_write_tokens
+                .saturating_add(usage.cache_creation_input_tokens.unwrap_or_default());
+        }
+        if has_model_tokens {
+            return [Some(billing), None];
+        }
+    }
+
+    let mut turn = usage
+        .filter(|usage| {
+            usage.input_tokens.is_some()
+                || usage.output_tokens.is_some()
+                || usage.cache_read_input_tokens.is_some()
+                || usage.cache_creation_input_tokens.is_some()
+        })
+        .map(|usage| ExecutionTokenUsage {
+            input_tokens: usage.input_tokens.unwrap_or_default(),
+            output_tokens: usage.output_tokens.unwrap_or_default(),
+            cache_read_tokens: usage.cache_read_input_tokens.unwrap_or_default(),
+            cache_write_tokens: usage.cache_creation_input_tokens.unwrap_or_default(),
+            ..Default::default()
+        });
+    if !cumulative && let Some(turn) = &mut turn {
+        turn.cost_usd = billing.cost_usd.take();
+        turn.model = billing.model.take();
+    }
+    [billing.cost_usd.is_some().then_some(billing), turn]
 }
 
 /// Structured tool data for Claude tools based on real samples
@@ -2788,6 +2900,76 @@ mod tests {
     fn normalize(json: &ClaudeJson, worktree: &str) -> Vec<NormalizedEntry> {
         let mut processor = ClaudeLogProcessor::new();
         normalize_helper(&mut processor, json, worktree)
+    }
+
+    #[test]
+    fn claude_result_prefers_whole_run_usage_over_turn_usage() {
+        let result = serde_json::from_str(r#"{
+            "type":"result", "total_cost_usd":0.125,
+            "usage":{"input_tokens":2,"output_tokens":3},
+            "modelUsage":{
+                "claude-main":{"inputTokens":12,"outputTokens":30,"cacheReadInputTokens":4,"cacheCreationInputTokens":5,"costUSD":0.0625,"contextWindow":200000},
+                "claude-subagent":{"inputTokens":8,"outputTokens":5,"cacheReadInputTokens":6,"cacheCreationInputTokens":10,"costUSD":0.03125}
+            }
+        }"#).unwrap();
+        let entries = normalize(&result, TEST_WORKTREE);
+        let NormalizedEntryType::TokenUsageInfo(usage) = &entries[0].entry_type else {
+            panic!("expected a usage entry");
+        };
+        assert_eq!(usage.total_tokens, 0);
+        assert_eq!(
+            usage.billing,
+            Some(ExecutionTokenUsage {
+                input_tokens: 20,
+                output_tokens: 35,
+                cache_read_tokens: 10,
+                cache_write_tokens: 15,
+                cost_usd: Some(0.125),
+                ..Default::default()
+            })
+        );
+    }
+
+    #[test]
+    fn claude_resumed_cost_and_turn_tokens_keep_their_own_scope() {
+        let init = serde_json::from_str(
+            r#"{
+            "type":"system", "subtype":"init", "claude_code_version":"2.1.277"
+        }"#,
+        )
+        .unwrap();
+        let result = serde_json::from_str(
+            r#"{
+            "type":"result", "total_cost_usd":0.125,
+            "usage":{"input_tokens":2,"output_tokens":3}
+        }"#,
+        )
+        .unwrap();
+        let mut processor = ClaudeLogProcessor::new();
+        normalize_helper(&mut processor, &init, TEST_WORKTREE);
+        let entries = normalize_helper(&mut processor, &result, TEST_WORKTREE);
+        let breakdowns: Vec<_> = entries
+            .into_iter()
+            .filter_map(|entry| match entry.entry_type {
+                NormalizedEntryType::TokenUsageInfo(usage) => usage.billing,
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            breakdowns,
+            vec![
+                ExecutionTokenUsage {
+                    cost_usd: Some(0.125),
+                    cumulative: true,
+                    ..Default::default()
+                },
+                ExecutionTokenUsage {
+                    input_tokens: 2,
+                    output_tokens: 3,
+                    ..Default::default()
+                },
+            ]
+        );
     }
 
     #[test]
