@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use axum::{
     Router,
-    extract::{Query, State, ws::Message},
-    response::IntoResponse,
+    extract::{Path, Query, State, ws::Message},
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
@@ -47,6 +48,7 @@ enum TerminalCommand {
 enum TerminalMessage {
     Output { data: String },
     Error { message: String },
+    Exited,
 }
 
 async fn terminal_ws(
@@ -119,6 +121,9 @@ async fn handle_terminal_ws(
         tokio::select! {
             maybe_output = output_rx.recv() => {
                 let Some(data) = maybe_output else {
+                    let msg = serde_json::to_string(&TerminalMessage::Exited)
+                        .expect("a unit terminal event is serializable");
+                    let _ = socket.send(Message::Text(msg.into())).await;
                     break;
                 };
 
@@ -163,6 +168,34 @@ async fn handle_terminal_ws(
     }
 
     let _ = deployment.pty().close_session(session_id).await;
+    let _ = socket.close().await;
+}
+
+async fn terminal_asset(Path(asset): Path<String>) -> Response {
+    macro_rules! asset {
+        ($file:literal) => {
+            include_str!(concat!("../../../nsh-app/src/terminal/assets/", $file))
+        };
+    }
+
+    let (mime, body) = match asset.as_str() {
+        "view" => ("text/html; charset=utf-8", asset!("index.html")),
+        "panel.js" => ("text/javascript; charset=utf-8", asset!("panel.js")),
+        "xterm.js" => ("text/javascript; charset=utf-8", asset!("xterm.js")),
+        "addon-fit.js" => ("text/javascript; charset=utf-8", asset!("addon-fit.js")),
+        "panel.css" => ("text/css; charset=utf-8", asset!("panel.css")),
+        "xterm.css" => ("text/css; charset=utf-8", asset!("xterm.css")),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::X_FRAME_OPTIONS, "DENY"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 async fn send_error(socket: &mut MaybeSignedWebSocket, message: &str) -> anyhow::Result<()> {
@@ -176,5 +209,7 @@ async fn send_error(socket: &mut MaybeSignedWebSocket, message: &str) -> anyhow:
 }
 
 pub(super) fn router() -> Router<DeploymentImpl> {
-    Router::new().route("/terminal/ws", get(terminal_ws))
+    Router::new()
+        .route("/terminal/ws", get(terminal_ws))
+        .route("/terminal/{asset}", get(terminal_asset))
 }

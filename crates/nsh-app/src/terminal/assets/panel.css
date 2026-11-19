@@ -1,0 +1,31 @@
+:root {
+  color-scheme: dark;
+  background: #102d2a;
+  color: #e3f2e9;
+  font: 13px Consolas, 'IBM Plex Mono', monospace;
+}
+
+body {
+  position: relative;
+  display: grid;
+  box-sizing: border-box;
+  height: 100dvh;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: hidden;
+}
+
+#terminal {
+  min-width: 0;
+  min-height: 0;
+}
+
+#status {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  left: 10px;
+  background: #102d2a;
+  color: #b1d4c5;
+  padding-top: 6px;
+}
