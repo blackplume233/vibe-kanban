@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
-const require = createRequire(new URL('../../../../packages/web-core/package.json', import.meta.url));
+const require = createRequire(import.meta.url);
 const files = [
   ['@xterm/xterm', '5.5.0', 'lib/xterm.js', 'xterm.js'],
   ['@xterm/xterm', '5.5.0', 'css/xterm.css', 'xterm.css'],

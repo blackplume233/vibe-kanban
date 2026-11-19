@@ -54,6 +54,8 @@
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.19.43",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "bippy": "0.5.28",
     "concurrently": "^8.2.2",
     "esbuild": "^0.28.2",
