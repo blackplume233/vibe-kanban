@@ -25,7 +25,7 @@ cargo +1.99.1 clippy --workspace --all-targets --features qa-mode -- -D warnings
 
 显式设置环境后，首次编译越过原始日志中的四处诊断，在 `git_workflow` 测试发现 Unix 专用导入未限定作用域，以 `101` 退出。该轮日志位于 `F:/vk-targets/m0/m0-public-clippy-first-build.log`。
 
-## 最终结果
+## Rust 1.99.1 结果
 
 严格 Clippy 退出码为 `101`。最终日志未再出现表列的五处 Windows 诊断。编译推进到 `executors`，其库与库测试均报告同一组 19 处 `clippy::double_must_use`。诊断来自 `#[async_trait]` 展开，生成的方法带有不含消息的 `#[must_use]`，返回值是已经标记为 `must_use` 的装箱 Future。
 
@@ -38,3 +38,16 @@ cargo +1.99.1 clippy --workspace --all-targets --features qa-mode -- -D warnings
 | `executors/mod.rs` | `309:15` | `spawn:316`、`spawn_follow_up:324`、`spawn_review:333`、`get_setup_helper_action:360`、`discover_options:378`、`warm_options_cache:391` |
 
 本次结果只覆盖 Windows 上的公开 Cargo 工作区 Clippy 命令。根 Goal 的 E1 仍待完整验证。
+
+## 锁定 nightly 复验
+
+集成工作树的 `F:/vk-targets/main/m0-m2-nightly-clippy.log` 显示，`nightly-2026-08-01` 越过 `executors`，在 `crates/services/src/services/analytics.rs` 的 Windows 机器标识读取分支报告两处诊断。`139:9` 的 `clippy::collapsible_if` 通过合并命令执行与退出状态判断修复。`140:19` 的 `clippy::needless_borrows_for_generic_args` 通过直接传递参数数组修复。
+
+在 `my/m0` 复用上节两个环境变量，运行仓库锁定的工具链：
+
+```bash
+cargo +nightly-2026-08-01 clippy --workspace --all-targets --features qa-mode -- -D warnings \
+  > F:/vk-targets/m0/m0-public-nightly-clippy.log 2>&1
+```
+
+命令退出码为 `0`，耗时 `3m 21s`。该次运行没有报告 `clippy::double_must_use`。Cargo 单独提示 `sentry 0.46.2` 和 `sentry-tracing 0.46.2` 可能与未来 Rust 版本不兼容。
