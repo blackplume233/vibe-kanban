@@ -26,3 +26,16 @@
 - Windows 上运行 `CARGO_TARGET_DIR=F:/vk-targets/m4 cargo +1.99.1 test --offline --locked --manifest-path crates/nsh-app/Cargo.toml --lib`，19 项通过。新测试覆盖百分号与中文查询编码、PATCH 的省略与显式清空、删除响应、失效落点、隐含相邻议题、批量回滚、服务端 ID、错误响应和焦点锚点。
 - 配置 Goal 的 LLVM 环境后，`CARGO_TARGET_DIR=F:/vk-targets/m4/web cargo +1.99.1 check --offline --locked --manifest-path crates/nsh-app/Cargo.toml --lib --target wasm32-unknown-unknown` 通过。
 - NSH 界面接入时，从 `BoardEffect` 读取导航意图或启动异步提交，在请求成功、失败或取消时调用 `finish`。真实界面操作和性能验收属于下一切片。
+
+## 共享议题界面
+
+`App` 在同一运行时提供议题工作台和工作区视图。议题界面提供项目索引、虚拟列表、看板、命令搜索、右键和键盘菜单、拖放排序、详情、行内编辑、分诊、周期与保存视图。启动 Agent 的确认面板读取真实仓库、分支与执行器配置，提交后选中新工作区。
+
+- `app.rs` 的 `selected` 保存共享工作区 ID，可在 `workspace_pane` 挂载工作区生命周期、PR、会话和终端。`selected_issue` 由 `board_view` 更新，生命周期组件可用该信号提供议题上下文。
+- `board_ui.rs` 的 `Ui.project` 和 `Ui.board` 提供当前项目 ID 和状态列表。项目同步面板可挂在项目索引 `rail`，同步成功后递增 `Ui.reload` 触发重新加载。界面最外层的工作区和议题导航旁可挂载 Agent 管理。
+- 使用同一工作树构建的调试后端和隔离 SQLite 启动 Win32 Release。5,000 条压力测试议题和 5 条具名议题通过 HTTP 校验。从启动原生进程到首次真实议题滚动耗时 901.0 ms。七个有效窗口中最高 `--fps` 主线程 `frame` p95 为 4.57 ms，滚动偏移从 288 到 6,000 pt。`gap` p95 约 264 ms，采样使用间歇滚轮输入，`gap` 包含等待绘制的时间。
+- Win32 的独立键盘运行用窗口定向的方向键和 Enter 打开 `VO-1`，通过 UI Automation 核验详情标题。该运行首滚用时 1,250.5 ms，`frame` p95 为 7.14 ms。两次采样的原生冷启动结果分别低于和高于 1 秒目标。
+- Chromium 157.0.8103.50 在 1360 × 900 视口验证键盘打开及返回、议题／项目／工作区模糊搜索、新建、行内编辑、右键菜单、键盘移动、拖放、分诊、周期分配和保存视图。写入后由 M2 API 核对 SQLite 数据。滚动 5,006 条议题时，482 个 `AnimationFrame::Render` 切片的 p95 为 3.007 ms，独立的 561 个 rAF 间隔的 p95 为 19.70 ms。以首次键盘打开议题后的绘制机会计，Web 冷启动用时 1,082.7 ms。前一次 Playwright 等待方式测得 2,661.3 ms。
+- 浏览器用例未启动真实 Agent，Win32 本轮覆盖列表滚动及键盘打开详情。完整 Agent 到 PR 流程、IME 输入与重复冷启动验收仍需要集成实测。
+
+证据见 [Win32 性能](../evidence/m4-native-results.json)、[Win32 键盘截图](../evidence/m4-native-keyboard-detail.png)、[Chromium 测量](../evidence/m4-web-results.json)、[操作日志](../evidence/m4-web-steps.log)、[看板拖放](../evidence/m4-web-drop.png)和[保存视图](../evidence/m4-web-saved-view.png)。复现入口为 `harness/tools/m4-runtime.py`。原始 Chromium 渲染 trace 位于 `F:/vk-targets/m4/proof-web-measured/web-scroll-trace.json`。

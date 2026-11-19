@@ -1,0 +1,65 @@
+{
+  "wheel_events": 120,
+  "process_to_window_ms": 374.77250000000004,
+  "dpi_scale": 1,
+  "benchmark_elapsed_ms": 7614.8018,
+  "cold_start_signal": "First nonzero actual issue-list offset after HTTP load and Win32 wheel input",
+  "client_px": [
+    1080,
+    760
+  ],
+  "benchmark_start_log_line": 7,
+  "monitor_px": [
+    2560,
+    1440
+  ],
+  "cold_to_usable_ms": 901.0165000000001,
+  "final_offset_px": 6000,
+  "benchmark_end_log_line": 44,
+  "started_at_utc": "2026-11-19T16:01:56.1618824Z",
+  "initial_offset_px": 288,
+  "total_issues": 5005,
+  "scroll_windows": [
+    {
+      "frames": 4,
+      "frame_p95_ms": 2.32,
+      "line": "[2026-11-19T16:01:58Z INFO  nsh::perf] fps 4/60 frame 2.14/2.28/2.32/2.32 gap 262.73/262.11/263.95/263.95 over 0% tick 0.01/0.01/0.01/0.01 drain 0.11/0.17/0.18/0.18 paint 0.44/0.43/0.56/0.56 present 0.11/0.08/0.23/0.23 canvas 0.00/0.00/0.00/0.00 commits 3 js 0.79/0.88/1.03/1.03 core 0.41/0.29/0.60/0.60 items 80 engine 0% cpu 9% mem 86.8 MB"
+    },
+    {
+      "frames": 4,
+      "frame_p95_ms": 2.46,
+      "line": "[2026-11-19T16:01:59Z INFO  nsh::perf] fps 4/60 frame 2.23/2.29/2.46/2.46 gap 262.65/262.11/263.95/263.95 over 0% tick 0.01/0.01/0.01/0.01 drain 0.05/0.05/0.05/0.05 paint 0.44/0.42/0.53/0.62 present 0.12/0.08/0.22/0.25 canvas 0.00/0.00/0.00/0.00 commits 3 js 0.67/0.88/1.03/1.03 core 0.31/0.22/0.60/0.60 items 50 engine 0% cpu 6% mem 86.8 MB"
+    },
+    {
+      "frames": 4,
+      "frame_p95_ms": 2.46,
+      "line": "[2026-11-19T16:02:00Z INFO  nsh::perf] fps 4/60 frame 2.18/2.23/2.46/2.46 gap 260.60/262.11/263.95/263.95 over 0% tick 0.01/0.01/0.01/0.01 drain 0.05/0.04/0.05/0.05 paint 0.42/0.42/0.50/0.50 present 0.21/0.12/1.23/1.23 canvas 0.00/0.00/0.00/0.00 commits 3 js 0.57/0.30/1.03/1.03 core 0.27/0.20/0.60/0.60 items 39 engine 0% cpu 0% mem 86.8 MB"
+    },
+    {
+      "frames": 4,
+      "frame_p95_ms": 2.46,
+      "line": "[2026-11-19T16:02:01Z INFO  nsh::perf] fps 4/60 frame 2.18/2.22/2.46/2.46 gap 260.75/262.43/264.79/264.79 over 0% tick 0.01/0.01/0.01/0.01 drain 0.05/0.05/0.06/0.06 paint 0.41/0.41/0.45/0.48 present 0.28/0.20/0.58/1.49 canvas 0.00/0.00/0.00/0.00 commits 3 js 0.56/0.30/1.03/1.03 core 0.26/0.21/0.60/0.60 items 35 engine 0% cpu 3% mem 86.8 MB"
+    },
+    {
+      "frames": 4,
+      "frame_p95_ms": 2.86,
+      "line": "[2026-11-19T16:02:02Z INFO  nsh::perf] fps 4/60 frame 2.24/2.22/2.86/2.92 gap 260.48/262.11/264.79/265.12 over 0% tick 0.01/0.01/0.01/0.01 drain 0.05/0.05/0.06/0.06 paint 0.49/0.47/0.65/0.65 present 0.41/0.31/1.24/1.24 canvas 0.00/0.00/0.00/0.00 commits 3 js 0.52/0.30/0.95/1.03 core 0.28/0.21/0.60/0.70 items 33 engine 0% cpu 5% mem 86.8 MB"
+    },
+    {
+      "frames": 4,
+      "frame_p95_ms": 2.92,
+      "line": "[2026-11-19T16:02:03Z INFO  nsh::perf] fps 4/60 frame 2.33/2.22/2.92/4.57 gap 260.45/262.43/264.79/265.12 over 0% tick 0.01/0.01/0.01/0.01 drain 0.07/0.05/0.14/0.14 paint 0.52/0.42/1.16/1.42 present 0.32/0.33/0.46/0.66 canvas 0.00/0.00/0.00/0.01 commits 3 js 0.56/0.34/1.03/1.54 core 0.28/0.22/0.60/0.70 items 32 engine 0% cpu 0% mem 88.5 MB"
+    },
+    {
+      "frames": 4,
+      "frame_p95_ms": 4.57,
+      "line": "[2026-11-19T16:02:04Z INFO  nsh::perf] fps 4/60 frame 2.53/2.28/4.57/4.68 gap 260.51/262.66/264.90/265.12 over 0% tick 0.01/0.01/0.01/0.01 drain 0.07/0.09/0.09/0.09 paint 0.73/0.64/1.40/1.40 present 0.37/0.39/0.73/0.73 canvas 0.00/0.00/0.01/0.01 commits 3 js 0.53/0.34/1.03/1.54 core 0.30/0.22/0.60/0.70 items 30 engine 0% cpu 13% mem 88.3 MB"
+    }
+  ],
+  "max_window_frame_p95_ms": 4.57,
+  "frame_metric": "NSH Win32 main-thread work per presented frame, excluding VSync wait",
+  "budgets": {
+    "native_cold_start_1000_ms": true,
+    "native_frame_p95_16_ms": true
+  }
+}

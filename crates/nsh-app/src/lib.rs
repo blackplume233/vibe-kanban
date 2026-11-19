@@ -6,6 +6,8 @@ mod app;
 mod desktop;
 mod package;
 #[cfg(any(windows, target_arch = "wasm32"))]
+mod board_ui;
+#[cfg(any(windows, target_arch = "wasm32"))]
 mod socket;
 
 pub mod board_state;

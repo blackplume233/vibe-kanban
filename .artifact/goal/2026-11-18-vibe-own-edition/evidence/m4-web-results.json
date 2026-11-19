@@ -1,0 +1,58 @@
+{
+  "raf": {
+    "first_row_before": "VO-2 M4 Keyboard neighbor",
+    "first_row_after": "VO-302 M4 Load issue 0297",
+    "p50_ms": 18.899999999999636,
+    "p95_ms": 19.700000000000728,
+    "max_ms": 36.80000000000018,
+    "wheel_events": 100
+  },
+  "raf_intervals": 561,
+  "trace_rendering": {
+    "Layerize": {
+      "events": 482,
+      "p95_ms": 0.671,
+      "total_ms": 258.817
+    },
+    "Layout": {
+      "events": 1061,
+      "p95_ms": 0.242,
+      "total_ms": 169.986
+    },
+    "Paint": {
+      "events": 5443,
+      "p95_ms": 1.002,
+      "total_ms": 492.025
+    },
+    "PrePaint": {
+      "events": 1064,
+      "p95_ms": 0.26,
+      "total_ms": 91.824
+    },
+    "UpdateLayoutTree": {
+      "events": 1061,
+      "p95_ms": 0.098,
+      "total_ms": 58.877
+    },
+    "AnimationFrame::Render": {
+      "events": 482,
+      "p95_ms": 3.007,
+      "total_ms": 889.67
+    }
+  },
+  "trace_first_row_before": "VO-302 M4 Load issue 0297",
+  "trace_first_row_after": "VO-603 M4 Load issue 0598",
+  "browser": "157.0.8103.50",
+  "headless": true,
+  "viewport": {
+    "width": 1360,
+    "height": 900
+  },
+  "seeded_issues": 5005,
+  "benchmark_issues": 5006,
+  "cold_to_usable_ms": 1082.6999999284744,
+  "budgets": {
+    "web_cold_start_2000_ms": true,
+    "web_render_frame_p95_16_ms": true
+  }
+}
