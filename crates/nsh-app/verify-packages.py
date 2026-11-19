@@ -2,7 +2,7 @@
 
 Requires Chrome, Python playwright/psutil/pywin32/Pillow, Node and the local-web
 Vite installation. Run with --help for paths. Output includes screenshots and
-Windows application logs. The fixture is confined to a temporary profile.
+Windows application logs. The isolated fixture remains in the evidence directory.
 """
 
 import argparse
@@ -104,7 +104,7 @@ def capture_window(hwnd, target):
         capture = ctypes.windll.user32.PrintWindow
         capture.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint)
         assert capture(hwnd, memory.GetSafeHdc(), 2), "PrintWindow failed"
-        image = Image.frombytes('RGB', size, bitmap.GetBitmapBits(True), 'raw', 'BGRX', 0, -1)
+        image = Image.frombytes('RGB', size, bitmap.GetBitmapBits(True), 'raw', 'BGRX', 0, 1)
         assert image.getbbox(), "Win32 window capture is empty"
         image.save(target)
     finally:
@@ -227,7 +227,7 @@ def main():
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, exist_ok=True)
     ctypes.windll.user32.SetProcessDPIAware()
-    with TemporaryDirectory(prefix="vibe-own-m7-", dir=args.evidence) as directory:
+    with TemporaryDirectory(prefix="vibe-own-m7-", dir=args.evidence, delete=False) as directory:
         profile = Path(directory)
         with runner(args.exe, profile, args.evidence / "m7-native-seed.log") as process:
             hwnd, base = until(lambda: live_runner(process), "first Win32 window and API")
