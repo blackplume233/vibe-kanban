@@ -55,6 +55,15 @@ impl QueuedMessageService {
             .into())
     }
 
+    /// Queue a confirmed generated follow-up without replacing the editor's stored message.
+    pub async fn queue_if_running_and_empty(
+        &self,
+        session_id: Uuid,
+        data: DraftFollowUpData,
+    ) -> Result<bool, Error> {
+        StoredFollowUp::save_if_running_and_empty(&self.pool, session_id, data).await
+    }
+
     pub async fn cancel_queued(&self, session_id: Uuid) -> Result<(), Error> {
         StoredFollowUp::delete(&self.pool, session_id, None).await?;
         Ok(())

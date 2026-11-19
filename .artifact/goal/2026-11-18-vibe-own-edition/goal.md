@@ -5,9 +5,9 @@ artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: loop-005
-next_sub_goal: 复验 M1 的锁定 nightly 依赖调整，集成 M5 和 M6 的队列接线，验证双端展示页和正式包。
-last_verified_loop: loop-005
+current_loop: loop-007
+next_sub_goal: 复验 ACP 升级，合入 GitHub 后端、正式包与本地操作界面。
+last_verified_loop: loop-007
 termination_reason: null
 handoff_summary: null
 references: references.md

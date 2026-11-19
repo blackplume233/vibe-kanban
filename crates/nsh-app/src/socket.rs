@@ -3,7 +3,10 @@ use futures_channel::mpsc::{UnboundedReceiver, unbounded};
 pub(crate) type Frames = UnboundedReceiver<Result<String, String>>;
 
 #[cfg(windows)]
-pub(crate) fn connect(url: String) -> Result<(Frames, ()), String> {
+pub(crate) struct Connection;
+
+#[cfg(windows)]
+pub(crate) fn connect(url: String) -> Result<(Frames, Connection), String> {
     use std::{io::ErrorKind, net::TcpStream, time::Duration};
 
     use tungstenite::{Error, Message, client};
@@ -49,7 +52,7 @@ pub(crate) fn connect(url: String) -> Result<(Frames, ()), String> {
             }
         })
         .map_err(|e| e.to_string())?;
-    Ok((rx, ()))
+    Ok((rx, Connection))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -105,4 +108,4 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::connect;
+pub(crate) use browser::{Connection, connect};

@@ -94,13 +94,13 @@ fn decode_response<T: DeserializeOwned, E: DeserializeOwned>(
 }
 
 #[derive(Deserialize)]
-struct PatchFrame {
+pub(crate) struct PatchFrame {
     #[serde(rename = "JsonPatch")]
-    patch: Option<json_patch::Patch>,
+    pub(crate) patch: Option<json_patch::Patch>,
     #[serde(default, rename = "Ready")]
-    ready: bool,
+    pub(crate) ready: bool,
     #[serde(default)]
-    finished: bool,
+    pub(crate) finished: bool,
 }
 
 #[derive(Clone, Deserialize, PartialEq)]
@@ -190,6 +190,17 @@ impl Api {
         Ok(data)
     }
 
+    pub(crate) fn stream(
+        &self,
+        path: &str,
+    ) -> Result<(socket::Frames, socket::Connection), String> {
+        socket::connect(self.websocket_url(path))
+    }
+
+    pub(crate) fn websocket_url(&self, path: &str) -> String {
+        format!("{}{}", self.ws, path)
+    }
+
     pub(crate) async fn workspaces(&self) -> Result<Vec<Workspace>, String> {
         self.get("/api/workspaces").await
     }
@@ -200,10 +211,8 @@ impl Api {
         files: Signal<Files>,
         status: Signal<SharedString>,
     ) -> Result<(), String> {
-        let (mut frames, _connection) = socket::connect(format!(
-            "{}/api/workspaces/{workspace}/git/diff/ws",
-            self.ws
-        ))?;
+        let (mut frames, _connection) =
+            self.stream(&format!("/api/workspaces/{workspace}/git/diff/ws"))?;
         let mut document = json!({"entries": {}});
         while let Some(frame) = frames.next().await {
             let frame = parse_frame(&frame?)?;
@@ -246,9 +255,9 @@ impl Api {
             status.set("No sessions in this workspace".into());
             return Ok(());
         };
-        let (mut frames, _connection) = socket::connect(format!(
-            "{}/api/execution-processes/stream/session/ws?session_id={}",
-            self.ws, session.id
+        let (mut frames, _connection) = self.stream(&format!(
+            "/api/execution-processes/stream/session/ws?session_id={}",
+            session.id
         ))?;
         let mut document = json!({"execution_processes": {}});
         let mut seen = HashSet::new();
@@ -297,10 +306,8 @@ impl Api {
         id: String,
         lines: Signal<Vec<SharedString>>,
     ) -> Result<(), String> {
-        let (mut frames, _connection) = socket::connect(format!(
-            "{}/api/execution-processes/{id}/raw-logs/ws",
-            self.ws
-        ))?;
+        let (mut frames, _connection) =
+            self.stream(&format!("/api/execution-processes/{id}/raw-logs/ws"))?;
         while let Some(frame) = frames.next().await {
             let frame = parse_frame(&frame?)?;
             if let Some(patch) = frame.patch {
@@ -329,7 +336,7 @@ impl Api {
     }
 }
 
-fn parse_frame(input: &str) -> Result<PatchFrame, String> {
+pub(crate) fn parse_frame(input: &str) -> Result<PatchFrame, String> {
     serde_json::from_str(input).map_err(|e| e.to_string())
 }
 

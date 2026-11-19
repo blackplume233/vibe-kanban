@@ -321,13 +321,37 @@ impl Issue {
         query.build_query_as().fetch_one(executor).await
     }
 
+    pub(super) async fn find_github_issues(
+        conn: &mut sqlx::SqliteConnection,
+        project_id: Uuid,
+        external_id: &str,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        let mut query = QueryBuilder::<Sqlite>::new(SELECT_ISSUE);
+        query
+            .push_bind(project_id)
+            .push(" AND i.external_provider = 'github' AND i.external_id = ")
+            .push_bind(external_id)
+            .push(" COLLATE NOCASE LIMIT 2");
+        query.build_query_as().fetch_all(conn).await
+    }
+
     pub async fn create(
         pool: &SqlitePool,
         project_id: Uuid,
         payload: &CreateIssue,
     ) -> Result<Self, sqlx::Error> {
-        let id = Uuid::new_v4();
         let mut tx = pool.begin().await?;
+        let issue = Self::create_in(&mut tx, project_id, payload).await?;
+        tx.commit().await?;
+        Ok(issue)
+    }
+
+    pub(super) async fn create_in(
+        conn: &mut sqlx::SqliteConnection,
+        project_id: Uuid,
+        payload: &CreateIssue,
+    ) -> Result<Self, sqlx::Error> {
+        let id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO issues (id, project_id, status_id, title, description, priority,
                 start_date, target_date, sort_order, parent_issue_id, cycle_id, triage,
@@ -352,14 +376,12 @@ impl Issue {
         .bind(payload.external_provider.as_deref())
         .bind(payload.external_id.as_deref())
         .bind(payload.external_url.as_deref())
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
         if let Some(tags) = &payload.tag_ids {
-            Self::replace_tags(&mut tx, project_id, id, tags).await?;
+            Self::replace_tags(conn, project_id, id, tags).await?;
         }
-        let issue = Self::get(&mut *tx, project_id, id).await?;
-        tx.commit().await?;
-        Ok(issue)
+        Self::get(conn, project_id, id).await
     }
 
     pub async fn update(
@@ -396,7 +418,7 @@ impl Issue {
         Ok(issues)
     }
 
-    async fn update_in(
+    pub(super) async fn update_in(
         conn: &mut sqlx::SqliteConnection,
         project_id: Uuid,
         id: Uuid,

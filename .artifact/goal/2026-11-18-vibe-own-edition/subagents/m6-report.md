@@ -1,5 +1,9 @@
 # M6 ACP Agent 管理交付报告
 
+## 已安装适配器联调
+
+使用本机 Claude CLI 的 ACP 适配器完成新建会话、跨进程续接与 MCP 工具发现。Claude prompt 和 Codex 新建会话遇到认证错误。锁定注册表的适配器版本仍需通过产品入口使用授权身份验收。见 [实测结果与复跑命令](../evidence/m6-real-adapters.md)。
+
 分支 `my/m6` 的实现提交为 `02e3c0e902ae1b7c381171a134b285bcc1a159a4`。本报告与验收记录位于其后的文档提交。
 
 ## 改动
@@ -40,3 +44,19 @@
 - `generate_types.rs` 保留两组追加声明。顺序采用现有分支的 M6 段在前，随后追加 M2 段。`shared/types.ts` 以合并后的 Rust 声明为准，使用仓库锁定工具链生成。
 - `.gitattributes` 使用 `my/main` 的 LF 约定。M2、M6 的 DB 新查询均使用运行时绑定，合并沿用现有 `.sqlx` 元数据。
 - `cargo +nightly-2026-08-01 run --offline -p server --bin generate_types` 生成后，`generate_types.exe --check` 退出 `0`，确认 TypeScript 与 10 个 schema 字节一致。合并后的 `cargo +nightly-2026-08-01 clippy --offline -p db -p executors -p services -p local-deployment -p server --all-targets -- -D warnings` 编译检查完成。
+
+## Claude 与 Codex 的 ACP 选项
+
+ACP 注册表现在列出 `claude-acp` 与 `codex-acp`。可从现有代理安装界面选择，或分别调用 `POST /api/acp-registry/agents/claude-acp` 与 `POST /api/acp-registry/agents/codex-acp`。安装通过通用 `AcpServer` 创建 `CLAUDE_ACP` 与 `CODEX_ACP` profiles。新建会话可显式选择它们，并使用对应代理的 MCP 配置和 ACP 用量。已有 `CLAUDE_CODE` 与 `CODEX` profiles 和会话继续使用原生执行器，避免丢失按消息恢复、原生 review 与旧会话行为。
+
+测试覆盖注册表可见性、两套 profile 键共存，以及安装标识与原生 profile 隔离。[Claude ACP 能力](https://github.com/agentclientprotocol/claude-agent-acp) · [Codex ACP 能力](https://github.com/agentclientprotocol/codex-acp)
+
+## 单一 ACP SDK 与旧会话兼容
+
+`executors` 只依赖 `agent-client-protocol = 3.4.0`。Gemini 与 Qwen 共用当前 ACP harness，沿用既有 `gemini_sessions`、`qwen_sessions` 命名空间，支持旧 JSONL、客户端转录分支和带 `_meta.history_jsonl` 的续接。Windows 上保留旧适配器要求的 CRLF。会话、权限和工具更新事件直接使用 SDK 的 ACP v1 类型，移除 0.8 客户端及 `to_v08`。
+
+锁定 nightly 的组合测试通过 185 项，另有 5 项忽略。单独运行其中需要 MCP 二进制的测试，`session/new` 与 `session/load` 的 ACP 测试代理均从真实 `vibe-kanban-mcp` 的 `tools/list` 获得 `list_repos`。命令和结果见 [E6 MCP 工具发现记录](../evidence/m6-acp.md#ACP-Agent-发现本地-MCP-工具)。
+
+`cargo +nightly-2026-08-01 clippy --offline --locked -p db -p executors -p services -p local-deployment -p server --all-targets -- -D warnings` 与 `cargo +nightly-2026-08-01 run --offline --locked -p server --bin generate_types -- --check` 均退出 `0`。
+
+建议更新 M6 状态为 `completed`（本地用量、调度与 MCP 获得 E6 证据，ACP 适配器可显式安装并与原生 profiles 共存，0.8 依赖已移除）。如里程碑另要求将原生 `CLAUDE_CODE`、`CODEX` 强制切换，需先为原生恢复和 review 验证 ACP 等效能力。

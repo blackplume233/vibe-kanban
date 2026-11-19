@@ -69,6 +69,27 @@
       }
     },
     {
+      "id": "codex-acp",
+      "name": "Codex",
+      "version": "2.8.0",
+      "distribution": {
+        "npx": {
+          "package": "@agentclientprotocol/codex-acp@2.8.0"
+        }
+      }
+    },
+    {
+      "id": "github-copilot-cli",
+      "name": "GitHub Copilot CLI",
+      "version": "1.0.0",
+      "distribution": {
+        "npx": {
+          "package": "@github/copilot@1.0.0",
+          "args": ["--acp"]
+        }
+      }
+    },
+    {
       "id": "goose",
       "name": "goose",
       "version": "1.57.0",

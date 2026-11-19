@@ -303,6 +303,15 @@ fn generate_types_content() -> String {
         db::models::issue_links::IssueComment::decl(),
         db::models::issue_links::CreateIssueComment::decl(),
         db::models::issue_links::UpdateIssueComment::decl(),
+        // vibe-own M5
+        git_host::FailedPrCheck::decl(),
+        git_host::PrCheckSummary::decl(),
+        server::routes::workspaces::pr::PrDetailQuery::decl(),
+        server::routes::workspaces::pr::FixCiResponse::decl(),
+        services::services::github_issue_sync::SyncGitHubIssueRequest::decl(),
+        services::services::github_issue_sync::SyncGitHubIssueResponse::decl(),
+        services::services::github_issue_sync::IssueSyncOutcome::decl(),
+        services::services::github_issue_sync::IssueSyncField::decl(),
     ];
 
     let body = decls
@@ -310,9 +319,9 @@ fn generate_types_content() -> String {
         .map(|d| {
             let trimmed = d.trim_start();
             if trimmed.starts_with("export") {
-                d
+                without_trailing_whitespace(&d)
             } else {
-                format!("export {trimmed}")
+                format!("export {}", without_trailing_whitespace(trimmed))
             }
         })
         .collect::<Vec<_>>()
@@ -326,6 +335,15 @@ fn generate_types_content() -> String {
     );
 
     format!("{HEADER}\n\n{body}\n\n{constants}")
+}
+
+fn without_trailing_whitespace(declaration: &str) -> String {
+    // ts-rs emits a space before the newline when a documented field follows a comma.
+    declaration
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn generate_json_schema<T: JsonSchema>() -> Result<String, serde_json::Error> {

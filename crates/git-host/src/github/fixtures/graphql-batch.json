@@ -1,0 +1,136 @@
+{
+  "data": {
+    "p0": {
+      "pullRequest": {
+        "number": 12,
+        "url": "https://github.com/example/project/pull/12",
+        "state": "OPEN",
+        "mergedAt": null,
+        "mergeCommit": null,
+        "title": "Cache changes",
+        "baseRefName": "main",
+        "headRefName": "feature/cache",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "id": "C_example",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "opaque"
+                    },
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Windows tests",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": "https://github.com/example/project/actions/runs/42"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Linux tests",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "detailsUrl": null
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Publish",
+                        "status": "COMPLETED",
+                        "conclusion": "SKIPPED",
+                        "detailsUrl": null
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Build",
+                        "status": "IN_PROGRESS",
+                        "conclusion": null,
+                        "detailsUrl": null
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "external/coverage",
+                        "state": "ERROR",
+                        "targetUrl": null
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "pageInfo": {
+            "hasPreviousPage": false
+          },
+          "nodes": [
+            {
+              "state": "COMMENTED",
+              "comments": {
+                "pageInfo": {
+                  "hasPreviousPage": false
+                },
+                "nodes": [
+                  {
+                    "fullDatabaseId": "1024",
+                    "author": {
+                      "login": "maintainer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Cover the no-cache path.",
+                    "createdAt": "2026-11-19T08:30:00Z",
+                    "url": "https://github.com/example/project/pull/12#discussion_r1024",
+                    "path": "src/lib.rs",
+                    "line": 12,
+                    "diffHunk": "@@ -10,0 +12,1 @@"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "PENDING",
+              "comments": {
+                "pageInfo": {
+                  "hasPreviousPage": false
+                },
+                "nodes": [
+                  {
+                    "fullDatabaseId": "1025",
+                    "author": {
+                      "login": "maintainer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Cover the no-cache path.",
+                    "createdAt": "2026-11-19T08:30:00Z",
+                    "url": "https://github.com/example/project/pull/12#discussion_r1024",
+                    "path": "src/lib.rs",
+                    "line": 12,
+                    "diffHunk": "@@ -10,0 +12,1 @@"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "p1": null,
+    "rateLimit": {
+      "remaining": 4996,
+      "resetAt": "2026-11-19T09:00:00Z"
+    }
+  },
+  "errors": [
+    {
+      "type": "NOT_FOUND",
+      "path": [
+        "p1"
+      ],
+      "message": "Could not resolve repository"
+    }
+  ]
+}
