@@ -44,4 +44,3 @@
 | `PATCH /projects/P/issues/I` 给 `VO-1` 设置 cycle ID，再 `GET /projects/P/issues?cycle_id={id}` | `["VO-1"]` |
 | `POST /projects/P/saved-views`，过滤同一 cycle 和 `started`，再 `PUT` 更新并 `GET` 列表 | 首次响应保留 `cycle_id` 和 `status_category`，更新后为 `[{"name":"Triage","filter":{"triage":true}}]` |
 | `DELETE` 保存视图、cycle、关系和 `VO-1`，再 `GET /projects/P/issues/{child_id}` | 四个删除均返回 `success: true`，`VO-2` 的 `parent_issue_id` 清空 |
-
