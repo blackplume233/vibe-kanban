@@ -183,6 +183,7 @@ struct Frame {
 #[derive(Clone, Default, PartialEq)]
 pub(super) struct Processes {
     pub running_dev: BTreeSet<String>,
+    pub latest_dev: Option<String>,
     pub agent_running: bool,
 }
 
@@ -224,6 +225,7 @@ pub(super) async fn watch_processes(
         *ready |= frame.ready;
         if snapshots.iter().all(|(_, ready)| *ready) {
             let mut processes = Processes::default();
+            let mut latest = None;
             for (snapshot, _) in &snapshots {
                 if let Some(entries) = snapshot["execution_processes"].as_object() {
                     for (id, process) in entries {
@@ -231,6 +233,9 @@ pub(super) async fn watch_processes(
                             match process["run_reason"].as_str() {
                                 Some("devserver") => {
                                     processes.running_dev.insert(id.clone());
+                                    let started =
+                                        process["started_at"].as_str().unwrap_or_default();
+                                    latest = latest.max(Some((started, id.as_str())));
                                 }
                                 Some("codingagent" | "setupscript" | "cleanupscript") => {
                                     processes.agent_running = true
@@ -241,6 +246,7 @@ pub(super) async fn watch_processes(
                     }
                 }
             }
+            processes.latest_dev = latest.map(|(_, id)| id.to_owned());
             status.set(Some(processes));
         }
         streams.push(stream.into_future());

@@ -22,3 +22,9 @@
 | 本地议题关联 | 浏览器设置已创建的本地议题并创建工作区。用列表按工作区 ID 和 `local_issue_id` 比对，停止并重启同一数据库的 `server.exe` 后再比对。调用议题 DELETE 后，工作区详情仍读到同一 ID 且 `local_issue_id` 变为 `null`。使用不存在的 UUID 提交时返回 HTTP 400，前后工作区 ID 集合相同。 |
 
 独立后端 build、Web WASM build 和类型生成通过。新增 DB 回归测试的 Cargo 任务在重编译 `executors` 时达到 360 秒上限，未得到单测结果。对应有效关联、重启、无效关联回滚和删除行为已通过真实 HTTP 验证。组合跑编辑器和 Git 时，Windows 上已打开的工作树遇到现有后端 `os error 32`。Git 场景改用独立 fixture 复跑通过。
+
+## 开发预览
+
+启动开发服务器后，组件监听当前工作区最新的运行中 dev server，按 React 的日志规则识别本地端口，也支持手动输入端口。Web 和 Win32 的共享入口都通过系统浏览器打开 `http://<dev-port>.localhost:<preview-proxy-port>/`。停止服务后预览入口随执行进程状态消失。
+
+在 Chromium 用真实本地仓库和 Python HTTP 服务验证。NSH 从进程启动日志识别 `59419`，通过后端独立代理源打开 fixture。浏览器确认 `window.opener` 为空，且预览页无法跨源读取应用 API。手动输入应用、后端或代理端口时，预览按钮处于禁用状态。 [控件截图](../evidence/m7-workspaces-preview-control.png) [独立源页面截图](../evidence/m7-workspaces-preview-page.png)

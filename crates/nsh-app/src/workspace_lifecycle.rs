@@ -8,6 +8,8 @@ use crate::api::Api;
 
 #[path = "workspace_lifecycle_data.rs"]
 mod data;
+#[path = "workspace_lifecycle_preview.rs"]
+mod preview;
 #[path = "workspace_lifecycle_view.rs"]
 mod ui;
 

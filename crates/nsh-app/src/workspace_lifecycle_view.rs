@@ -675,6 +675,7 @@ fn detail(api: Rc<Api>, state: State) -> impl IntoElement {
                         })
                         .app_class(Some("text-xs text-muted-foreground".into())),
                     )
+                    .child(super::preview::panel(api.clone(), state))
                     .child(git_panel(api.clone(), state))
             }
         }))
@@ -1189,7 +1190,10 @@ fn labeled(label: &'static str, content: impl IntoElement) -> impl IntoElement {
         .child(content)
 }
 
-fn action(label: impl IntoReactive<SharedString>, primary: bool) -> nsh_base::ButtonElement {
+pub(super) fn action(
+    label: impl IntoReactive<SharedString>,
+    primary: bool,
+) -> nsh_base::ButtonElement {
     let surface = if primary {
         "bg-primary text-primary-foreground"
     } else {
