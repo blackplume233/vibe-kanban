@@ -27,6 +27,9 @@ pub struct CodingAgentFollowUpRequest {
     /// If None, uses the container_ref directory directly.
     #[serde(default)]
     pub working_dir: Option<String>,
+    /// Trusted review follow-up. The executor can respond with text only.
+    #[serde(default)]
+    pub discussion_only: bool,
 }
 
 impl CodingAgentFollowUpRequest {
@@ -75,6 +78,14 @@ impl Executable for CodingAgentFollowUpRequest {
                 .get_coding_agent(&profile_id)
                 .ok_or(ExecutorError::UnknownExecutorType(profile_id.to_string()))?;
 
+            if self.discussion_only {
+                let crate::executors::CodingAgent::ClaudeCode(claude) = agent else {
+                    return Err(ExecutorError::UnknownExecutorType(profile_id.to_string()));
+                };
+                return claude
+                    .spawn_discussion_follow_up(&effective_dir, &self.prompt, &self.session_id, env)
+                    .await;
+            }
             if self.executor_config.has_overrides() {
                 agent.apply_overrides(&self.executor_config);
             }

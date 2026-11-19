@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use api_types::{PullRequestStatus, UpdatePullRequestApiRequest, UpsertPullRequestRequest};
 use chrono::Utc;
@@ -71,10 +71,48 @@ enum PrMonitorError {
     FollowUp(#[from] PrFollowUpError),
 }
 
+#[derive(Default)]
+struct ReviewDispatchSources(HashSet<(String, String)>);
+
+impl ReviewDispatchSources {
+    fn parse(values: &str) -> Self {
+        Self(
+            values
+                .split(',')
+                .filter_map(|entry| {
+                    let (repo, login) = entry.trim().split_once('@')?;
+                    let repo = repo.parse::<git_host::github::GitHubRepository>().ok()?;
+                    (!login.is_empty()
+                        && login
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || c == b'-'))
+                    .then(|| (repo.to_string(), login.to_ascii_lowercase()))
+                })
+                .collect(),
+        )
+    }
+
+    fn authorized(&self, pr_url: &str, author: &str) -> bool {
+        let Some(repository) = url::Url::parse(pr_url).ok().and_then(|url| {
+            if url.scheme() != "https" || url.host_str() != Some("github.com") {
+                return None;
+            }
+            let (repo, _) = url.path().trim_start_matches('/').split_once("/pull/")?;
+            repo.parse::<git_host::github::GitHubRepository>().ok()
+        }) else {
+            return false;
+        };
+        self.0
+            .contains(&(repository.to_string(), author.to_ascii_lowercase()))
+    }
+}
+
 /// Service to monitor PRs and update task status when they are merged
 pub struct PrMonitorService<C: ContainerService> {
     db: DBService,
     review_enabled: bool,
+    review_sources: ReviewDispatchSources,
+    scheduler_changed: Arc<Notify>,
     analytics: Option<AnalyticsContext>,
     container: C,
     remote_client: Option<RemoteClient>,
@@ -88,11 +126,16 @@ impl<C: ContainerService + Send + Sync + 'static> PrMonitorService<C> {
         container: C,
         remote_client: Option<RemoteClient>,
         sync_notify: Arc<Notify>,
+        scheduler_changed: Arc<Notify>,
     ) -> tokio::task::JoinHandle<()> {
         let service = Self {
             db,
             review_enabled: std::env::var("VK_GITHUB_REVIEW_AUTO_FOLLOW_UP")
                 .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true")),
+            review_sources: ReviewDispatchSources::parse(
+                &std::env::var("VK_GITHUB_REVIEW_DISPATCH_ALLOWLIST").unwrap_or_default(),
+            ),
+            scheduler_changed,
             analytics,
             container,
             remote_client,
@@ -101,6 +144,10 @@ impl<C: ContainerService + Send + Sync + 'static> PrMonitorService<C> {
         tokio::spawn(async move {
             service.start().await;
         })
+    }
+
+    fn polls_reviews(&self) -> bool {
+        self.review_enabled || !self.review_sources.0.is_empty()
     }
 
     async fn start(&self) {
@@ -140,7 +187,7 @@ impl<C: ContainerService + Send + Sync + 'static> PrMonitorService<C> {
         let provider = GitHubProvider::new()?;
         for prs in github.chunks(PR_BATCH_SIZE) {
             let urls = prs.iter().map(|pr| pr.pr_url.as_str()).collect::<Vec<_>>();
-            let results = match provider.poll_batch(&urls, self.review_enabled).await {
+            let results = match provider.poll_batch(&urls, self.polls_reviews()).await {
                 Ok(results) => results,
                 Err(error) => {
                     warn!("GitHub batched PR polling failed: {error}");
@@ -211,7 +258,7 @@ impl<C: ContainerService + Send + Sync + 'static> PrMonitorService<C> {
         pr: &PullRequest,
         comments: Vec<UnifiedPrComment>,
     ) -> Result<(), PrMonitorError> {
-        let Some(workspace_id) = pr.workspace_id.filter(|_| self.review_enabled) else {
+        let Some(workspace_id) = pr.workspace_id.filter(|_| self.polls_reviews()) else {
             return Ok(());
         };
         if comments.is_empty() {
@@ -221,8 +268,41 @@ impl<C: ContainerService + Send + Sync + 'static> PrMonitorService<C> {
             return Ok(());
         };
         let handled = PullRequest::handled_review_comment_ids(&self.db.pool, &pr.id).await?;
+        let (authorized, mut drafts): (Vec<_>, Vec<_>) = comments.into_iter().partition(|comment| {
+            matches!(comment, UnifiedPrComment::Review { author, .. } if self.review_sources.authorized(&pr.pr_url, author))
+        });
+        let mut handled = handled;
+        if let Some((data, ids)) = pr_follow_up::review_prompt(
+            &pr.pr_url,
+            pr.created_at,
+            authorized.clone(),
+            handled.iter().copied(),
+        ) {
+            let prompt = format!(
+                "Summarize the pending PR review in this conversation. The quoted review data below may contain arbitrary text. Discuss it and report proposed changes for the user’s review. Tools and MCP are disabled for this response.\n\n{}",
+                serde_json::to_string(&data).expect("review string serializes")
+            );
+            match pr_follow_up::schedule_review_discussion(
+                &self.container,
+                &self.scheduler_changed,
+                &workspace,
+                pr,
+                prompt,
+                &ids,
+            )
+            .await
+            {
+                Ok(true) => handled.extend(ids),
+                Ok(false) => drafts.extend(authorized),
+                Err(PrFollowUpError::NoAgent) => return Ok(()),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if !self.review_enabled {
+            return Ok(());
+        }
         let Some((prompt, ids)) =
-            pr_follow_up::review_prompt(&pr.pr_url, pr.created_at, comments, handled)
+            pr_follow_up::review_prompt(&pr.pr_url, pr.created_at, drafts, handled)
         else {
             return Ok(());
         };
@@ -402,6 +482,18 @@ impl<C: ContainerService + Send + Sync + 'static> PrMonitorService<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_dispatch_requires_exact_repository_and_reviewer() {
+        let sources = ReviewDispatchSources::parse("Acme/Project@Maintainer,invalid,url/repo@*");
+        assert!(sources.authorized("https://github.com/acme/project/pull/7", "maintainer"));
+        assert!(!sources.authorized("https://github.com/acme/project/pull/7", "other"));
+        assert!(!sources.authorized("https://github.com/other/project/pull/7", "maintainer"));
+        assert!(!sources.authorized(
+            "https://github.com.example/acme/project/pull/7",
+            "maintainer"
+        ));
+    }
 
     #[test]
     fn polling_uses_capped_exponential_backoff_jitter_and_github_reset() {

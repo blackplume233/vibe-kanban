@@ -194,6 +194,7 @@ pub async fn follow_up(
             prompt: prompt.clone(),
             session_id: info.session_id,
             reset_to_message_id: if is_reset { info.message_id } else { None },
+            discussion_only: false,
             executor_config: payload.executor_config.clone(),
             working_dir: working_dir.clone(),
         })

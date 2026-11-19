@@ -4,8 +4,10 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
-use super::merge::{Merge, MergeStatus, PrMerge, PullRequestInfo};
-use super::scratch::{DraftFollowUpData, ScratchError, ScratchPayload};
+use super::{
+    merge::{Merge, MergeStatus, PrMerge, PullRequestInfo},
+    scratch::{DraftFollowUpData, ScratchError, ScratchPayload},
+};
 
 #[derive(Debug, Clone, FromRow)]
 pub struct PullRequest {
@@ -255,6 +257,35 @@ impl PullRequest {
         Ok(())
     }
 
+    /// Admit the prepared execution and claim its review comments in the same transaction.
+    pub async fn schedule_review_follow_up(
+        pool: &SqlitePool,
+        pr_id: &str,
+        process_id: Uuid,
+        comment_ids: &[i64],
+    ) -> Result<bool, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        for id in comment_ids {
+            let inserted = sqlx::query("INSERT INTO github_review_follow_ups (pull_request_id, comment_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
+                .bind(pr_id)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            if inserted == 0 {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+        }
+        sqlx::query("INSERT INTO execution_queue (execution_process_id, queued_at) VALUES (?, ?)")
+            .bind(process_id)
+            .bind(Utc::now())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     pub async fn count_open_for_workspace(
         pool: &SqlitePool,
         workspace_id: Uuid,
@@ -445,6 +476,74 @@ mod tests {
                 .await
                 .unwrap(),
             vec![42]
+        );
+    }
+
+    #[sqlx::test]
+    async fn review_dispatch_admits_each_comment_once_without_consuming_editor_drafts(
+        pool: SqlitePool,
+    ) {
+        let workspace = Uuid::new_v4();
+        let session = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        sqlx::query("INSERT INTO workspaces (id, branch) VALUES (?, 'test')")
+            .bind(workspace)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sessions (id, workspace_id) VALUES (?, ?)")
+            .bind(session)
+            .bind(workspace)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO execution_processes (id, session_id, run_reason) VALUES (?, ?, 'codingagent'), (?, ?, 'codingagent')").bind(first).bind(session).bind(second).bind(session).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO pull_requests (id, pr_url, pr_number, target_branch_name) VALUES ('test', 'https://github.com/example/project/pull/7', 7, 'main')").execute(&pool).await.unwrap();
+        let draft = DraftFollowUpData {
+            message: "Editor message".into(),
+            executor_config: ExecutorConfig::new(BaseCodingAgent::claude_code()),
+        };
+        crate::models::execution_queue::StoredFollowUp::save(&pool, session, draft.clone())
+            .await
+            .unwrap();
+        PullRequest::draft_review_follow_up(&pool, "test", session, draft, &[41])
+            .await
+            .unwrap();
+        assert!(
+            PullRequest::schedule_review_follow_up(&pool, "test", first, &[42])
+                .await
+                .unwrap()
+        );
+        assert!(
+            !PullRequest::schedule_review_follow_up(&pool, "test", second, &[43, 42])
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            crate::models::execution_queue::ScheduledExecution::list(&pool)
+                .await
+                .unwrap()[0]
+                .execution_process_id,
+            first
+        );
+        assert_eq!(
+            PullRequest::handled_review_comment_ids(&pool, "test")
+                .await
+                .unwrap(),
+            vec![41, 42]
+        );
+        assert!(
+            Scratch::find_by_id(&pool, session, &ScratchType::DraftFollowUp)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            crate::models::execution_queue::StoredFollowUp::get(&pool, session)
+                .await
+                .unwrap()
+                .is_some()
         );
     }
 }

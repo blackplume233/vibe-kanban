@@ -147,6 +147,48 @@ pub struct ClaudeCode {
 }
 
 impl ClaudeCode {
+    pub(crate) async fn spawn_discussion_follow_up(
+        &self,
+        current_dir: &Path,
+        prompt: &str,
+        session_id: &str,
+        env: &ExecutionEnv,
+    ) -> Result<SpawnedChild, ExecutorError> {
+        let mut restricted = self.clone();
+        restricted.append_prompt = AppendPrompt::default();
+        restricted.plan = Some(true);
+        restricted.approvals = Some(false);
+        let launcher = self
+            .cmd
+            .base_command_override
+            .as_deref()
+            .unwrap_or_else(|| base_command(false));
+        let command = CommandBuilder::new(launcher).params([
+            "-p",
+            "--permission-mode=plan",
+            "--verbose",
+            "--output-format=stream-json",
+            "--input-format=stream-json",
+            "--include-partial-messages",
+            "--replay-user-messages",
+            "--tools",
+            "",
+            "--setting-sources",
+            "",
+            "--disable-slash-commands",
+            "--strict-mcp-config",
+            "--mcp-config",
+            r#"{"mcpServers":{}}"#,
+            "--settings",
+            r#"{"disableAllHooks":true}"#,
+        ]);
+        let parts = command.build_follow_up(&["--resume".into(), session_id.into()])?;
+        let mut env = env.clone();
+        env.commit_reminder = false;
+        restricted
+            .spawn_internal(current_dir, prompt, parts, &env)
+            .await
+    }
     async fn build_command_builder(&self) -> Result<CommandBuilder, CommandBuildError> {
         // If base_command_override is provided and claude_code_router is also set, log a warning
         if self.cmd.base_command_override.is_some() && self.claude_code_router.is_some() {

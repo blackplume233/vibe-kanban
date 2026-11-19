@@ -707,7 +707,11 @@ executor_config: ExecutorConfig,
  * Optional relative path to execute the agent in (relative to container_ref).
  * If None, uses the container_ref directory directly.
  */
-working_dir: string | null, };
+working_dir: string | null,
+/**
+ * Trusted review follow-up. The executor can respond with text only.
+ */
+discussion_only: boolean, };
 
 export type ReviewRequest = {
 /**

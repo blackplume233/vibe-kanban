@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt::Write};
 use chrono::{DateTime, Utc};
 use db::models::{
     coding_agent_turn::CodingAgentTurn,
-    execution_process::{ExecutionProcess, ExecutionProcessRunReason},
+    execution_process::{ExecutionProcess, ExecutionProcessRunReason, ExecutionProcessStatus},
     pull_request::PullRequest,
     scratch::{DraftFollowUpData, ScratchError},
     session::Session,
@@ -92,6 +92,69 @@ pub(super) async fn save_review_draft(
     Ok(())
 }
 
+pub(super) async fn schedule_review_discussion(
+    container: &(impl ContainerService + Sync),
+    scheduler: &tokio::sync::Notify,
+    workspace: &Workspace,
+    pr: &PullRequest,
+    prompt: String,
+    ids: &[i64],
+) -> Result<bool, PrFollowUpError> {
+    if cfg!(feature = "qa-mode") {
+        return Ok(false);
+    }
+    let pool = &container.db().pool;
+    let (session, executor_config) = agent_target(pool, workspace).await?;
+    if executor_config.executor != executors::executors::BaseCodingAgent::claude_code() {
+        return Ok(false);
+    }
+    let Some(turn) = CodingAgentTurn::find_latest_session_info(pool, session.id).await? else {
+        return Ok(false);
+    };
+    let mut workspace = workspace.clone();
+    workspace.container_ref = Some(container.ensure_container_exists(&workspace).await?);
+    let working_dir = session
+        .agent_working_dir
+        .clone()
+        .filter(|dir| !dir.is_empty());
+    let action = ExecutorAction::new(
+        ExecutorActionType::CodingAgentFollowUpRequest(CodingAgentFollowUpRequest {
+            prompt,
+            session_id: turn.session_id,
+            reset_to_message_id: None,
+            discussion_only: true,
+            executor_config,
+            working_dir,
+        }),
+        None,
+    );
+    let process = container
+        .prepare_execution(
+            &workspace,
+            &session,
+            &action,
+            &ExecutionProcessRunReason::CodingAgent,
+        )
+        .await?;
+    match PullRequest::schedule_review_follow_up(pool, &pr.id, process.id, ids).await {
+        Ok(true) => {
+            scheduler.notify_one();
+            tracing::info!(execution_process_id = %process.id, "Scheduled text-only review discussion");
+            Ok(true)
+        }
+        outcome => {
+            ExecutionProcess::update_completion(
+                pool,
+                process.id,
+                ExecutionProcessStatus::Killed,
+                None,
+            )
+            .await?;
+            outcome.map(|_| true).map_err(Into::into)
+        }
+    }
+}
+
 pub async fn dispatch(
     container: &(impl ContainerService + Sync),
     queue: &QueuedMessageService,
@@ -133,6 +196,7 @@ pub async fn dispatch(
             prompt: data.message,
             session_id: info.session_id,
             reset_to_message_id: None,
+            discussion_only: false,
             executor_config: data.executor_config,
             working_dir,
         }),

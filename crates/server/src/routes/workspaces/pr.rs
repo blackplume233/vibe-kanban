@@ -236,6 +236,7 @@ async fn trigger_pr_description_follow_up(
             prompt,
             session_id: info.session_id,
             reset_to_message_id: None,
+            discussion_only: false,
             executor_config: executors::profile::ExecutorConfig::from(executor_profile_id.clone()),
             working_dir: working_dir.clone(),
         })

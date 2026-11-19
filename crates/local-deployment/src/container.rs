@@ -1106,6 +1106,7 @@ impl LocalContainerService {
                 prompt: queued_data.message.clone(),
                 session_id: info.session_id,
                 reset_to_message_id: None,
+                discussion_only: false,
                 executor_config: queued_data.executor_config.clone(),
                 working_dir: working_dir.clone(),
             })
