@@ -17,7 +17,7 @@
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
 | M4 Linear 交互 | in-progress | 已合入动作、搜索、议题 API 与看板状态。双端操作界面开发中。 |
-| M5 GitHub 联动 | in-progress | PR 与 Issue 同步后端及 M6 队列接线已合入 `efe17674f`，正在复验。测试仓库已验证 Issue 往返、review 草稿与失败检查派发。Agent 推送和转绿待验证。 |
+| M5 GitHub 联动 | in-progress | `efe17674f` 的 73 项测试和类型生成检查通过。NSH 面板已合入待接线。测试仓库上的 Agent 推送、CI 转绿和 review 自动派发待验收。 |
 | M6 ACP 管理 | in-progress | SDK 升级和 Claude/Codex ACP 选项已合入。Claude 已验证跨进程续接和 MCP 发现。Claude prompt 与 Codex 新建会话遇到认证错误。 |
 | M7 对等与退役 | in-progress | 已实测独立分支的双端 CLI 包及 ConPTY。继续验证数据目录隔离、主题接入及终端退出，退役依赖 M4–M6 和本地操作对等。 |
 
@@ -31,7 +31,7 @@
 - Windows LF 检出规则已合入，实测 `generate_types --check` 退出 0。
 - 锁定 NSH 版本的打包 CLI 在 nightly 下编译通过，输出 `nsh 0.4.0`。正式应用包仍在 E1 验收范围。
 - M1 已通过锁定 nightly 的路线闸门，见 `../evidence/m1-gate.md`。Chrome rAF 间隔 p95 为 19.60 ms，E3 的产品列表帧耗时与启动测量待验收。
-- M6 集成验证中 180 项测试通过、4 项忽略，生成检查和所涉 crate 的严格 Clippy 均退出 0。完整迁移仍待同一验收版本验证。
+- M6 协议升级在 `4cb6f061c` 通过 185 项测试，5 项忽略。单独复验 `session/new` 和 `session/load` 均从真实 MCP 进程发现 `list_repos`。M5 集成复验的 73 项测试及生成检查通过，原始日志为 `F:/vk-targets/main/m5-acp-integration.log`。
 - E2 的离线部分验证本地议题、Agent 和 diff。真实开 PR 在 E5 的授权测试仓库联网完成，两段均保留证据。
 - E5 在私有测试仓库 `blackplume233/vibe-own-sandbox` 验收，先用本机 `gh` 凭据和测试进程内的 PAT。若仓库权限不足，记录具体 API 和响应。
 

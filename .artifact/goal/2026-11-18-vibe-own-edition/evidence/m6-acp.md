@@ -1,5 +1,9 @@
 # M6 ACP 验收记录
 
+## 集成复验
+
+独立检出 `4cb6f061ccdcf40afadf92a9fb8969a4d0cd1abf`，加载 `harness/env.sh`，设置 `SQLX_OFFLINE=true`。锁定 nightly 上执行 `cargo test --locked --offline -p db -p executors -p services -p local-deployment -p server`，185 项通过，5 项忽略。另行构建 `vibe-kanban-mcp` 并运行上述 MCP 测试，两个请求均发现 `list_repos`。原始日志位于 `F:/vk-targets/main/m6-acp-upgrade-4cb6f061c.log`。已安装适配器的单独认证结果见 [实际联调](m6-real-adapters.md)。
+
 ## 本地 HTTP 验证
 
 Windows 上构建 `server.exe`，启动两次独立的回环 HTTP 服务，共用同一个工作树中的 SQLite 数据库。Copilot 测试预设通过 `base_command_override` 启动本地 Node.js ACP 模拟进程，使用真实的 ACP v2 harness、归一化日志、用量写入和 API。Git 仓库夹具只有一个空提交。最终运行退出码为 `0`。
