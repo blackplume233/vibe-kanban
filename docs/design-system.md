@@ -68,6 +68,15 @@ M3 将 `crates/nsh-app/design/tokens.json` 作为唯一手写设计值。`colors
 
 ### 生成与安装
 
+在仓库根目录用 Node 20 或更高版本生成产物。提交前运行 `--check`，它按字节检查每个派生文件，缺失或过期时返回失败并列出文件名。
+
+```bash
+node crates/nsh-app/design/generate-tokens.mjs
+node crates/nsh-app/design/generate-tokens.mjs --check
+```
+
+产物在 `crates/nsh-app/design/`。将 `tailwind.generated.json` 中的 `appearance`、`theme` 和 `tailwind` 字段合入 `nsh.json`。其中 `theme` 根据默认强调色指向 `theme-verdigris.generated.json` 或 `theme-amber.generated.json`。共享根从 `tokens.json` 读取默认密度、完整字型回退和其余样式参数，并使用同一对派生主题文件切换强调色。
+
 - 现有构建流程调用一次确定性生成步骤。它把 `space.step`、`type.scale`、`shape.card` 和 `size.split/wide` 写成 `nsh.json` 的 `tailwind.spacing`、`fontSize`、`radius.card` 和 `breakpoints`。同一步生成各强调色的 NSH `theme` JSON，按 `cssVars.theme/light/dark` 输出。所有派生文件由生成器管理，同一输入得到逐字节相同的输出。`nsh.json` 继续由 NSH CLI 打包。 [Tailwind 配置与主题][tw] · [配置解析器][tw-source]
 - `canvas/rail/panel/popover` 映射到 `background/sidebar/card/popover`，`ink` 映射到对应前景和 `accent-foreground`，`muted` 映射 `muted-foreground`，`divider/controlEdge` 映射 `border/input`。`hover` 输出为 `surface-hover`，也供基础组件的 `secondary` 与 `muted` 底色使用，其中 `secondary-foreground` 取 `ink`。强调色的 `fill/onFill/selection` 映射 `primary`、`primary-foreground`、`accent`，`ring` 取 `fill`。`sidebar-*` 的动作、选中、边框和焦点角色映射到相应的全局角色。状态使用 `status-info/ok/warn/error`，其中 `error` 也供 `destructive` 使用。生成器校验映射覆盖实际用到的角色，禁止在 `tailwind.colors` 复制主色等语义名，因为调色板会覆盖同名语义类。 [默认主题字段][base-theme] · [主题优先级][tw]
 - Rust 在两端共用 `nsh_base::theme()` 的响应式绑定读取颜色。`Root::tokens` 安装初始主题，CLI 生成的 Rust 入口从 `nsh.json` 的 `theme` 安装同一份默认初值。切换强调色时，共享根调用 `set_tokens` 安装对应派生主题。`set_color_scheme` 切换 `System/Light/Dark`，不会重建根。密度、字号、间距和动效取自同一份输入，作为共享 Rust 样式参数读取。类型化 Tailwind 方法使用内建量表，定制数值须显式传给 Rust 样式方法。语义类在 NSH 解析，构建入口继续使用现有 NSH 工具链。 [Rust 主题][rust-theme] · [CLI 根接线][cli-root] · [运行时主题接口][runtime-theme] · [外观设置][scheme] · [Tailwind 量表][tw]
