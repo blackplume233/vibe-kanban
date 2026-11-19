@@ -1,72 +1,40 @@
-<p align="center">
-  <a href="https://vibekanban.com">
-    <picture>
-      <source srcset="packages/public/vibe-kanban-logo-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/public/vibe-kanban-logo.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/public/vibe-kanban-logo.svg" alt="Vibe Kanban Logo">
-    </picture>
-  </a>
-</p>
+# Vibe Own
 
-<p align="center">Get 10X more out of Claude Code, Gemini CLI, Codex, Amp and other coding agents...</p>
-<p align="center">
-  <a href="https://www.npmjs.com/package/vibe-kanban"><img alt="npm" src="https://img.shields.io/npm/v/vibe-kanban?style=flat-square" /></a>
-  <a href="https://github.com/BloopAI/vibe-kanban/blob/main/.github/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/BloopAI/vibe-kanban/.github%2Fworkflows%2Fpublish.yml" /></a>
-  <a href="https://deepwiki.com/BloopAI/vibe-kanban"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
-</p>
+Vibe Own 是基于 [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) 的本地优先 Agent 看板。议题、工作区和执行记录保存在本机 SQLite。Windows 原生应用与 Web 共用同一套 NSH 界面和 Rust API。
 
-<h1 align="center">
-  <strong>Vibe Kanban is sunsetting.</strong>
-  <a href="https://www.vibekanban.com/blog/shutdown">Read the announcement.</a>
-</h1>
+- 用看板、列表、分诊、周期和保存视图管理议题，或用 `Ctrl+K` 搜索议题、项目和工作区。
+- 为议题启动独立 Git 工作树，查看 Agent 日志、diff 和终端，并从工作区创建 PR。
+- 同步 GitHub Issues、查看 CI 检查并发起修复。对配置过的仓库与评审者可自动续接文本评审。
+- 管理 ACP 执行器、并发、持久队列、用量、费率和 MCP 配置。
 
-![](packages/public/vibe-kanban-screenshot-overview.png)
+Windows 用户解压完整的 `vibe-own.zip` 后运行 `vibe-own/vibe-own.exe`。开发构建使用下方命令。Web 包可由本机 standalone 服务直接托管，发布资产布局见 [RELEASING.md](RELEASING.md)。
 
-## Overview
+GitHub 操作使用 Git 凭据与 GitHub API 凭据。需要 API 直连时，在应用启动前设置 `VK_GITHUB_TOKEN`。Agent 认证由各自的适配器管理。
 
-In a world where software engineers spend most of their time planning and reviewing coding agents, the most impactful way to ship more is to get faster at planning and review.
+交互和性能验收见 [方案与证据](.artifact/goal/2026-11-18-vibe-own-edition/evidence/product-interaction.md)。
 
-Vibe Kanban is built for this. Use kanban issues to plan work, either privately or with your team. When you're ready to begin, create workspaces where coding agents can execute.
+## 远程 ACP 节点
 
-- **Plan with kanban issues** — create, prioritise, and assign issues on a kanban board
-- **Run coding agents in workspaces** — each workspace gives an agent a branch, a terminal, and a dev server
-- **Review diffs and leave inline comments** — send feedback directly to the agent without leaving the UI
-- **Preview your app** — built-in browser with devtools, inspect mode, and device emulation
-- **Switch between 10+ coding agents** — Claude Code, Codex, Gemini CLI, GitHub Copilot, Amp, Cursor, OpenCode, Droid, CCR, and Qwen Code
-- **Create pull requests and merge** — open PRs with AI-generated descriptions, review on GitHub, and merge
+默认在本机执行。需要远程执行时，在 POSIX 节点上部署 [`vibe-acp` OpenSSH 子系统](crates/executors/src/executors/acp/trusted_node_subsystem.py)，为专用账户配置固定的 ACP 适配器、模型凭据及所需 MCP 工具。客户端和节点使用同一份可写工作树。节点也需要能读取并更新 linked worktree 的 Git 元数据。跨系统挂载时，确认两端的 Git 都能解析工作树元数据。
 
-![](packages/public/vibe-kanban-screenshot-workspace.png)
+应用启动前，将 `VK_ACP_TRUSTED_NODES_FILE` 指向本机的绝对配置路径。例如：
 
-One command. Describe the work, review the diff, ship it.
-
-```bash
-npx vibe-kanban
+```json
+{
+  "build-node": {
+    "registry_id": "codex-acp",
+    "host": "build-node.example.net",
+    "user": "vibe",
+    "port": 22,
+    "identity_file": "C:/vibe-keys/build-node",
+    "known_hosts_file": "C:/vibe-keys/known_hosts",
+    "local_root": "D:/shared-git",
+    "remote_root": "/srv/shared-git"
+  }
+}
 ```
 
-
-## Installation
-
-Make sure you have authenticated with your favourite coding agent. A full list of supported coding agents can be found in the [docs](https://vibekanban.com/docs/supported-coding-agents). Then in your terminal run:
-
-```bash
-npx vibe-kanban
-```
-
-## Documentation
-
-Head to the [website](https://vibekanban.com/docs) for the latest documentation and user guides.
-
-## Self-Hosting
-
-Want to host your own Vibe Kanban Cloud instance? See our [self-hosting guide](https://vibekanban.com/docs/self-hosting/deploy-docker).
-
-## Support
-
-We use [GitHub Discussions](https://github.com/BloopAI/vibe-kanban/discussions) for feature requests. Please open a discussion to create a feature request. For bugs please open an issue on this repo.
-
-## Contributing
-
-We would prefer that ideas and changes are first raised with the core team via [GitHub Discussions](https://github.com/BloopAI/vibe-kanban/discussions) or [Discord](https://discord.gg/AC4nwVtJM3), where we can discuss implementation details and alignment with the existing roadmap. Please do not open PRs without first discussing your proposal with the team.
+在 Agent 配置中编辑对应 ACP 预设，加入 `"trusted_node": "build-node"`，再用该预设启动工作区。将配置、身份文件和已核验的主机密钥保存在共享目录之外。恢复会话时使用原节点及原工作目录。停止任务会发送 ACP 取消。SSH 断连后，节点子系统会结束对应的 Agent 进程组。
 
 ## Development
 
