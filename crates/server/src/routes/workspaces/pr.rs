@@ -104,7 +104,7 @@ pub struct PrDetailQuery {
 #[derive(Debug, Serialize, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum FixCiResponse {
-    Started { execution_process_id: Uuid },
+    Scheduled { execution_process_id: Uuid },
     Queued { session_id: Uuid },
 }
 
@@ -154,9 +154,9 @@ async fn fix_ci(
     )
     .await
     {
-        Ok(PrFollowUpDispatch::Started {
+        Ok(PrFollowUpDispatch::Scheduled {
             execution_process_id,
-        }) => FixCiResponse::Started {
+        }) => FixCiResponse::Scheduled {
             execution_process_id,
         },
         Ok(PrFollowUpDispatch::Queued { session_id }) => FixCiResponse::Queued { session_id },

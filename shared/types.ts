@@ -737,7 +737,7 @@ export type NormalizedEntryType = { "type": "user_message" } | { "type": "user_f
  */
 executor_profile_id?: ExecutorProfileId, } | { "type": "token_usage_info" } & TokenUsageInfo | { "type": "user_answered_questions", answers: Array<AnsweredQuestion>, };
 
-export type TokenUsageInfo = { 
+export type TokenUsageInfo = {
 /**
  * Occupancy of the model context, independent of provider billing.
  */
@@ -917,11 +917,11 @@ sdp: string,
  */
 session_id: string, };
 
-export type ExecutionTokenUsage = { model: string | null, input_tokens: number, output_tokens: number, cache_read_tokens: number, cache_write_tokens: number, 
+export type ExecutionTokenUsage = { model: string | null, input_tokens: number, output_tokens: number, cache_read_tokens: number, cache_write_tokens: number,
 /**
  * The provider's reported USD cost, which can be an estimate.
  */
-cost_usd: number | null, 
+cost_usd: number | null,
 /**
  * True for a session/thread snapshot that can include earlier executions.
  * Compare snapshots of the same session to derive deltas; never sum them.
@@ -933,7 +933,7 @@ export type ExecutionUsageQuery = { session_id: string | null, workspace_id: str
 
 export type ExecutionUsageTotal = { executor: string, model: string | null, input_tokens: number, output_tokens: number, cache_read_tokens: number, cache_write_tokens: number, cost_usd: number | null, unpriced_samples: number, };
 
-export type ExecutionPrice = { executor: string, 
+export type ExecutionPrice = { executor: string,
 /**
  * Exact model ID, or `*` for the executor's default rates.
  */
@@ -997,7 +997,7 @@ export type PrCheckSummary = { total: number, passed: number, failed: number, pe
 
 export type PrDetailQuery = { repo_id: string, };
 
-export type FixCiResponse = { "status": "started", execution_process_id: string, } | { "status": "queued", session_id: string, };
+export type FixCiResponse = { "status": "scheduled", execution_process_id: string, } | { "status": "queued", session_id: string, };
 
 export type SyncGitHubIssueRequest = { repository: string, number: number, open_status_id: string, closed_status_id: string, write_back?: boolean, };
 

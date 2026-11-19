@@ -10,11 +10,13 @@ use db::models::{
     workspace::Workspace,
     workspace_repo::WorkspaceRepo,
 };
-use executors::actions::{
-    ExecutorAction, ExecutorActionType, coding_agent_follow_up::CodingAgentFollowUpRequest,
-    coding_agent_initial::CodingAgentInitialRequest,
+use executors::{
+    actions::{
+        ExecutorAction, ExecutorActionType, coding_agent_follow_up::CodingAgentFollowUpRequest,
+        coding_agent_initial::CodingAgentInitialRequest,
+    },
+    profile::ExecutorConfig,
 };
-use executors::profile::ExecutorConfig;
 use git_host::{PrCheckSummary, UnifiedPrComment};
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -44,7 +46,7 @@ pub enum PrFollowUpError {
 
 #[derive(Debug)]
 pub enum PrFollowUpDispatch {
-    Started { execution_process_id: Uuid },
+    Scheduled { execution_process_id: Uuid },
     Queued { session_id: Uuid },
 }
 
@@ -103,15 +105,13 @@ pub async fn dispatch(
         message: prompt,
         executor_config,
     };
-    if queue.has_queued(session.id) {
+    if queue.has_queued(session.id).await? {
         return Err(PrFollowUpError::Busy);
     }
     if ExecutionProcess::has_running_non_dev_server_processes_for_workspace(pool, workspace.id)
         .await?
     {
-        if ExecutionProcess::has_running_coding_agent_for_session(pool, session.id).await?
-            && queue.queue_if_empty(session.id, data)
-        {
+        if queue.queue_if_running_and_empty(session.id, data).await? {
             return Ok(PrFollowUpDispatch::Queued {
                 session_id: session.id,
             });
@@ -154,7 +154,7 @@ pub async fn dispatch(
             &ExecutionProcessRunReason::CodingAgent,
         )
         .await?;
-    Ok(PrFollowUpDispatch::Started {
+    Ok(PrFollowUpDispatch::Scheduled {
         execution_process_id: process.id,
     })
 }
