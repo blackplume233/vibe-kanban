@@ -1,0 +1,7 @@
+# Bash scripts require LF on all platforms.
+*.sh text eol=lf
+/scripts/clang text eol=lf
+
+# The type generator compares these files byte for byte.
+/shared/types.ts text eol=lf
+/shared/schemas/*.json text eol=lf
