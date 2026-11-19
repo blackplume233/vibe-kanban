@@ -3,5 +3,35 @@
   "id": "io.vibe-own.desktop",
   "version": "0.1.0",
   "rust": ".",
-  "root": "PackagedApp"
+  "root": "PackagedApp",
+  "appearance": "system",
+  "theme": "design/theme-verdigris.generated.json",
+  "tailwind": {
+    "spacing": 4,
+    "fontSize": {
+      "meta": [
+        12,
+        1.5
+      ],
+      "body": [
+        14,
+        1.5
+      ],
+      "title": [
+        18,
+        1.35
+      ],
+      "page": [
+        24,
+        1.25
+      ]
+    },
+    "radius": {
+      "card": 6
+    },
+    "breakpoints": {
+      "split": 960,
+      "wide": 1200
+    }
+  }
 }

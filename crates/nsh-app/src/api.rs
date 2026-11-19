@@ -104,7 +104,7 @@ type Files = Vec<(String, Rc<Diff>)>;
 
 impl Api {
     #[cfg(windows)]
-    pub(crate) fn local() -> Self {
+    pub fn local() -> Self {
         if let Some(port) = use_context::<crate::desktop::BackendPort>() {
             return Self::loopback(port.0);
         }

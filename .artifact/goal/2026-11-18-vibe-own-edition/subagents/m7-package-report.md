@@ -33,6 +33,7 @@
 
 ```bash
 nsh=F:/vk-targets/main/nsh-cli/debug/nsh.exe
+node design/generate-tokens.mjs --check
 "$nsh" package --target windows -o F:/vk-targets/m7-package/package-windows
 "$nsh" package --target web -o F:/vk-targets/m7-package/package-web
 cargo +nightly-2026-08-01 build --locked --release --lib --features m1-web-smoke --target wasm32-unknown-unknown

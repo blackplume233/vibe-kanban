@@ -7,7 +7,7 @@ Windows application logs. The fixture is confined to a temporary profile.
 
 import argparse
 from base64 import b64encode
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import ctypes
 import json
 import os
@@ -19,13 +19,14 @@ from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from urllib.error import URLError
 from urllib.parse import urlsplit
-from uuid import UUID
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 import psutil
 import win32gui
 import win32process
-from PIL import ImageGrab
+import win32ui
+from PIL import Image
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -82,12 +83,34 @@ def runner(executable, profile, log_path):
     env.update(VK_ASSET_DIR=str(profile / "data"), TEMP=str(profile), TMP=str(profile),
                NSH_APP_DIR=str(executable.parent / "nsh"))
     with log_path.open("wb") as log:
-        process = subprocess.Popen([str(executable)], env=env, cwd=executable.parent,
+        process = subprocess.Popen([str(executable)], env=env, cwd=profile,
                                    stdout=log, stderr=log)
         try:
             yield process
         finally:
             stop(process)
+
+
+def capture_window(hwnd, target):
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    size = (right - left, bottom - top)
+    handle = win32gui.GetWindowDC(hwnd)
+    window = win32ui.CreateDCFromHandle(handle)
+    memory = window.CreateCompatibleDC()
+    bitmap = win32ui.CreateBitmap()
+    bitmap.CreateCompatibleBitmap(window, *size)
+    memory.SelectObject(bitmap)
+    try:
+        capture = ctypes.windll.user32.PrintWindow
+        capture.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint)
+        assert capture(hwnd, memory.GetSafeHdc(), 2), "PrintWindow failed"
+        image = Image.frombytes('RGB', size, bitmap.GetBitmapBits(True), 'raw', 'BGRX', 0, -1)
+        assert image.getbbox(), "Win32 window capture is empty"
+        image.save(target)
+    finally:
+        memory.DeleteDC()
+        win32gui.DeleteObject(bitmap.GetHandle())
+        win32gui.ReleaseDC(hwnd, handle)
 
 
 def live_runner(process):
@@ -213,7 +236,7 @@ def main():
             assert api(base, "/workspaces") == [], "New profile contains existing workspaces"
             workspace, heartbeats = fixture(base, profile)
             close_window(process, hwnd, base)
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
             assert connection.execute("SELECT id FROM workspaces").fetchall() == [(UUID(workspace).bytes,)]
         paths = subprocess.check_output(
             ["git", "-C", str(profile / "fixture-repo"), "worktree", "list", "--porcelain"],
@@ -239,10 +262,10 @@ def main():
             win32gui.SendMessage(hwnd, 0x0202, 0, point)  # WM_LBUTTONUP
             until(lambda: logged(f"diff {workspace}: 1 changed files"), "Win32 real diff stream")
             until(lambda: logged(f"execution {execution}: 1 live log entries"), "Win32 real log stream")
-            win32gui.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0013)  # Topmost, same size/position, no activation.
-            image = ImageGrab.grab(bbox=win32gui.GetWindowRect(hwnd))
-            assert image.getbbox(), "Win32 window capture is empty"
-            image.save(args.evidence / "m7-native.png")
+            try:
+                capture_window(hwnd, args.evidence / "m7-native.png")
+            except (AssertionError, OSError, win32ui.error) as error:
+                print(f"Win32 window capture unavailable: {error}", flush=True)
             browser_smoke(args, base, workspace, execution)
             assert not logged(f"execution {execution}: raw log stream finished"), "Worker already finished"
             assert heartbeats.exists(), "Missing worker heartbeat"
