@@ -18,4 +18,4 @@ workflow_mode: light
 
 ## 执行指导
 
-用量、队列和 MCP 请求已合入。待合入的 ACP 升级 `d2d1423ac9` 在切片中通过 185 项测试，MCP 测试代理通过实际 `vibe-kanban-mcp` 发现 `list_repos`。合入时核对锁文件和换行。补齐实际 Claude/Codex 路径、配置读写及 NSH 查询和编辑证据。参见 `../../evidence/m6-acp.md` 和 `../../subagents/m6-report.md`。
+用量、队列和 MCP 请求已合入，ACP 升级和 LF 修复见 `4cb6f061c`。切片通过 185 项测试，MCP 测试代理通过实际 `vibe-kanban-mcp` 发现 `list_repos`。集成复验进行中。补齐实际 Claude/Codex 路径、配置读写及 NSH 查询和编辑证据。参见 `../../evidence/m6-acp.md` 和 `../../subagents/m6-report.md`。

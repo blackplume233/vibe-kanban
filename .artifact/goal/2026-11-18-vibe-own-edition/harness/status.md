@@ -17,13 +17,13 @@
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
 | M4 Linear 交互 | in-progress | 已合入动作、搜索、议题 API 与看板状态。双端操作界面开发中。 |
-| M5 GitHub 联动 | in-progress | PR 后端与 Issue 同步在独立分支验证。已创建私有测试仓库 `blackplume233/vibe-own-sandbox`。 |
-| M6 ACP 管理 | in-progress | 用量、持久队列和 MCP 已合入。SDK 升级与 Claude/Codex ACP 选择已交付，待换行修正及实机复验。 |
+| M5 GitHub 联动 | in-progress | PR 与 Issue 同步后端及 M6 队列接线已合入 `efe17674f`，正在复验。测试仓库已验证 Issue 往返、review 草稿与失败检查派发。Agent 推送和转绿待验证。 |
+| M6 ACP 管理 | in-progress | SDK 升级、Claude/Codex ACP 选项和 LF 修复已合入。正在复验后端与实际适配器。 |
 | M7 对等与退役 | in-progress | 已实测独立分支的双端 CLI 包及 ConPTY。继续验证数据目录隔离、主题接入及终端退出，退役依赖 M4–M6 和本地操作对等。 |
 
 ## Run
 
-- 当前 loop 为 `loop-006`。M1–M3 已验收，Win32 与 Web 产品界面按 M4–M7 继续集成。
+- 当前 loop 为 `loop-007`。M1–M3 已验收。ACP 升级已合入 `4cb6f061c`，正在从独立检出复验。
 
 ## Gate
 
