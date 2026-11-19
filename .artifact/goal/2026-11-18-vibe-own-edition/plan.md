@@ -27,7 +27,7 @@
 | M0 基线 | fork 在 `my/main` 上完整构建通过；Goal 目录已提交 | E1 中的 cargo check/test、pnpm check/lint 日志；首个提交 hash | 网络、工具链 | in-progress（公开构建、检查和测试通过。Clippy 已安装，Windows 诊断由 M0WindowsLint 处理。完整 check 需处理私有 `billing`。） |
 | M1 NSH Spike（路线闸门） | `crates/nsh-app` 在 Windows 原生窗口与浏览器中都能列工作区、看会话日志流、显示 diff | 两端截图；`--fps` 日志；switch_trigger 逐项判定记录 | M0、D4（LLVM） | in-progress（Rust 1.99.1 和锁定 NSH 提交的共享根组件已在 Win32 和 Chrome 渲染通过。见 `evidence/m1-native-build.md`、`evidence/m1-web-build.md`。下一步验证双端 HTTP。） |
 | M2 本地议题底座 | 不设置 `VK_SHARED_API_BASE` 时议题 CRUD、状态、标签、子议题、关系全部在 SQLite 中可用；API 与类型生成通过 | 迁移 + `cargo test`；`generate-types:check`；API 调用记录 | M0、D1 | in-progress（M2LocalIssues-2） |
-| M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | 设计规范独立，组件接入依赖 M1 | in-progress（M3DesignContract 起草规范） |
+| M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | 组件接入依赖 M1 | in-progress（设计规范已交付，主题生成与展示页继续） |
 | M4 Linear 级交互与议题能力 | NSH 中的看板/列表、拖拽、Cmd+K 模糊搜索、动作注册表、行内编辑、peek、triage、cycle、保存视图 | E2、E3 录屏与性能日志 | M2、M3 | pending |
 | M5 GitHub 联动 | CI 状态 + 一键修复、review 评论自动 follow-up、GraphQL 批量轮询、Issue 双向同步、PAT 认证 | E5 测试仓库演示记录 | Issue 双向同步依赖 M2 | in-progress（M5GitHubCore-2） |
 | M6 ACP Agent 管理 | 用量/成本、全局调度器 + 持久队列、MCP 注入、Claude/Codex 统一 ACP、可选远程节点 | E6 测试与 API 输出 | M0 | in-progress（M6AcpMgmt-2） |

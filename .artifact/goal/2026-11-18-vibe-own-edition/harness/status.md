@@ -15,7 +15,7 @@
 | M0 基线 | in-progress | 公开工作区检查和测试已通过。已安装 Clippy，严格 lint 现因源码诊断失败。完整 check 仍有私有依赖。 |
 | M1 NSH Spike | in-progress | 同一 Rust 根组件在 Win32 与 Chrome 渲染通过。下一步用真实本地 HTTP API 显示同一条工作区记录。 |
 | M2 本地议题底座 | in-progress | 在 `my/m2` 实现 SQLite 数据与 API。 |
-| M3 设计系统 | in-progress | 设计规范独立起草。组件展示页接入依赖 M1。 |
+| M3 设计系统 | in-progress | 设计规范已交付。主题生成在独立 worktree 开发，展示页接入依赖 M1。 |
 | M4 Linear 交互 | pending | 依赖 M2、M3 |
 | M5 GitHub 联动 | in-progress | 在 `my/m5` 实现 PR 核心。Issue 同步依赖 M2，真实验收等待测试仓库。 |
 | M6 ACP 管理 | in-progress | 在 `my/m6` 实现。允许 `local-deployment/src/lib.rs` 接入 SQLite pool，并在 `server/src/startup.rs` 清理孤儿进程后启动队列 worker。 |
