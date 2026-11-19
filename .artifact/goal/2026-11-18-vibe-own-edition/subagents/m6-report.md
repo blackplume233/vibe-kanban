@@ -30,3 +30,13 @@
 - Claude/Codex 保留专用执行器和现有 `profiles.json` 键。Claude 依赖 CLI 的 router 参数、权限选项、hooks 和按消息恢复（`claude.rs` 的 command builder 与 `spawn_follow_up`）。Codex 依赖 app-server 的 sandbox/审批设置、线程 fork、native review 及恢复（`codex.rs` 的 review、thread 启动和续接）。通用 ACP 目前只有通用会话、模型、模式、权限配置。统一切换需要这些能力的 ACP 对等实现与已有会话迁移，0.8 桥接仍由旧事件与 harness 使用。无需为当前切片调整已有 profiles。
 - 可选远程执行接缝为全局队列的领取/派发边界。未来由服务端选择节点，签发带租期与运行 ID 的凭据，将 action、工作区定位与节点能力交给受信节点。节点回传日志、用量、退出状态和心跳。租期收回时先确认上一节点运行的处置结果，再决定是否重派发。当前仅本机派发。
 - 建议 `plan.md` 的 M6 状态为 `in-progress`。E6 已取得本地 HTTP/ACP 和请求级 MCP 证据。严格 Clippy 需在 Windows 基线修复后复核，Claude/Codex 统一 ACP 受配置与会话兼容性约束。相关决策是接受现有专用执行器作为里程碑兼容路径，或要求补齐对等能力后关闭统一 ACP 项。
+
+## 与 M2 及 Windows 基线整合
+
+`my/m6` 在合并提交 `45535d286` 纳入 `my/main` 的 `7af50286a`。
+
+- `crates/db/src/models/mod.rs` 同时导出 M2 的 `issue`、`issue_board`、`issue_links` 和 M6 的 `execution_queue`、`execution_usage`。两组迁移按时间戳独立保留。
+- `crates/server/src/routes/mod.rs` 同时挂载 `agent_management::router()` 与 `issues::router()`，两者继续使用现有 relay middleware。
+- `generate_types.rs` 保留两组追加声明。顺序采用现有分支的 M6 段在前，随后追加 M2 段。`shared/types.ts` 以合并后的 Rust 声明为准，使用仓库锁定工具链生成。
+- `.gitattributes` 使用 `my/main` 的 LF 约定。M2、M6 的 DB 新查询均使用运行时绑定，合并沿用现有 `.sqlx` 元数据。
+- `cargo +nightly-2026-08-01 run --offline -p server --bin generate_types` 生成后，`generate_types.exe --check` 退出 `0`，确认 TypeScript 与 10 个 schema 字节一致。合并后的 `cargo +nightly-2026-08-01 clippy --offline -p db -p executors -p services -p local-deployment -p server --all-targets -- -D warnings` 编译检查完成。

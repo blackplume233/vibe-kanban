@@ -940,6 +940,7 @@ export type ExecutionSchedulerConfig = { max_concurrent: number, };
 export type ScheduledExecution = { execution_process_id: string, session_id: string, workspace_id: string, priority: number, queued_at: string, };
 
 export type ExecutionQueuePriority = { priority: number, };
+
 export type CreateLocalProject = { name: string, };
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low";
