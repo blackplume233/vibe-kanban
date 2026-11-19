@@ -1334,7 +1334,16 @@ fn issue_list(ui: Rc<Ui>, column: Option<Id>) -> impl IntoElement {
         }
     });
     if is_list {
-        list.element_ref(&ui.list_ref).focusable(true)
+        let list = list.element_ref(&ui.list_ref).focusable(true);
+        if log::log_enabled!(log::Level::Debug) {
+            list.on_viewable_items_change(|event: &nsh_core::element::ViewableItems| {
+                if let Some((first, last)) = event.viewable {
+                    log::debug!("m4 issue viewport={first}..={last}");
+                }
+            })
+        } else {
+            list
+        }
     } else {
         list
     }

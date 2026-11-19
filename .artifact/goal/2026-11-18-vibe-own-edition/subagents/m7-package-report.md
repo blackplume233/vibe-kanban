@@ -1,4 +1,13 @@
 # M7 NSH 正式打包切片
+## 共享产品入口复验
+
+共享入口 `7cbc13b483` 的 Win32 ZIP 和 Web 包均由锁定 NSH CLI 构建。`verify-packages.py` 通过 Win32 UI Automation 与 Chrome 157 选择工作区，再进入日志与变更。两端读到实际工作树 `review.txt` 从 `status=planned` 改成 `status=packaged` 的 diff 与运行中的日志。浏览器建立 4 条同源 WebSocket。关闭 Win32 窗口后，窗口进程正常退出，API 端口关闭，子进程心跳停止。脚本退出 0。[Win32 截图](../evidence/product-m7-native.png) · [Chrome 截图](../evidence/product-m7-browser.png)
+
+- Windows ZIP 为 `F:/vk-targets/main/product-windows/vibe-own.zip`，SHA-256 `19c71bfa917d6b1eac4d71eb4b35707cdd06081ec0c99620df209039fdb5e4f0`。11 个条目通过 ZIP CRC 检查。
+- Web 包的 WASM 为 `F:/vk-targets/main/product-web/vibe-own/nsh.1d92c475ff.wasm`，SHA-256 `1d92c475ff563ea78f38ebfdb3658d6d6035d2aa9edfac8704e004c66fe61c9f`。
+- Win32 计时包用 `VK_NSH_BENCHMARK=1` 记录分段，5,005 条议题下九次首滚耗时 650–810 ms，包含内嵌后端启动。Chrome 同规模首个键盘操作为 573.6 ms，滚动渲染切片 p95 为 3.17 ms。 [Win32 测量](../evidence/product-native-cold-stages.json) · [Chrome 测量](../evidence/product-web-results.json)
+
+
 
 ## 启动与部署
 

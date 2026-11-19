@@ -1,0 +1,111 @@
+{
+  "startup_reference": "Process creation including startup of the embedded server, with a prepared SQLite database",
+  "window_observation": "WinEvent EVENT_OBJECT_SHOW callback",
+  "api_observation": "Response decode completed, observed from the stderr pipe",
+  "first_response": "First nonzero actual virtual issue list offset, after exactly one wheel input",
+  "total_issues": 5005,
+  "samples_ms_from_process_start": [
+    {
+      "window_visible": 308.579,
+      "projects_api": 511.122,
+      "cycles_api": 514.219,
+      "saved-views_api": 516.307,
+      "statuses_api": 530.377,
+      "issues_api": 582.491,
+      "viewport_ready": 589.034,
+      "input_sent": 589.074,
+      "first_response": 810.11
+    },
+    {
+      "window_visible": 197.174,
+      "projects_api": 402.131,
+      "saved-views_api": 403.824,
+      "cycles_api": 404.313,
+      "statuses_api": 404.606,
+      "issues_api": 466.507,
+      "viewport_ready": 472.699,
+      "input_sent": 472.755,
+      "first_response": 661.051
+    },
+    {
+      "window_visible": 210.076,
+      "projects_api": 412.579,
+      "saved-views_api": 419.75,
+      "statuses_api": 420.14,
+      "cycles_api": 421.021,
+      "issues_api": 484.01,
+      "viewport_ready": 490.566,
+      "input_sent": 490.612,
+      "first_response": 649.989
+    },
+    {
+      "window_visible": 202.172,
+      "projects_api": 404.236,
+      "statuses_api": 406.102,
+      "saved-views_api": 409.205,
+      "cycles_api": 409.988,
+      "issues_api": 468.07,
+      "viewport_ready": 474.055,
+      "input_sent": 474.125,
+      "first_response": 664.907
+    },
+    {
+      "window_visible": 196.301,
+      "projects_api": 394.25,
+      "statuses_api": 398.864,
+      "saved-views_api": 399.555,
+      "cycles_api": 400.059,
+      "issues_api": 462.327,
+      "viewport_ready": 468.216,
+      "input_sent": 468.264,
+      "first_response": 665.629
+    },
+    {
+      "window_visible": 194.456,
+      "projects_api": 393.915,
+      "statuses_api": 395.361,
+      "cycles_api": 398.876,
+      "saved-views_api": 399.373,
+      "issues_api": 463.752,
+      "viewport_ready": 470.345,
+      "input_sent": 470.382,
+      "first_response": 650.196
+    },
+    {
+      "window_visible": 193.934,
+      "projects_api": 387.197,
+      "cycles_api": 388.939,
+      "statuses_api": 390.579,
+      "saved-views_api": 390.781,
+      "issues_api": 456.74,
+      "viewport_ready": 463.125,
+      "input_sent": 463.174,
+      "first_response": 659.864
+    },
+    {
+      "window_visible": 194.794,
+      "projects_api": 393.058,
+      "statuses_api": 399.346,
+      "cycles_api": 399.737,
+      "saved-views_api": 399.829,
+      "issues_api": 460.354,
+      "viewport_ready": 466.15,
+      "input_sent": 466.183,
+      "first_response": 677.356
+    },
+    {
+      "window_visible": 192.596,
+      "projects_api": 391.672,
+      "statuses_api": 394.024,
+      "cycles_api": 394.707,
+      "saved-views_api": 396.773,
+      "issues_api": 458.627,
+      "viewport_ready": 464.445,
+      "input_sent": 464.479,
+      "first_response": 656.028
+    }
+  ],
+  "budgets": {
+    "native_cold_start_1000_ms": true
+  }
+}

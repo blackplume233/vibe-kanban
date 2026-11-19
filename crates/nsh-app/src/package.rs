@@ -7,6 +7,10 @@ pub fn PackagedApp() -> impl IntoElement {
     {
         use crate::desktop::{Backend, BackendPort};
 
+        if std::env::var_os("VK_NSH_BENCHMARK").is_some_and(|value| value == "1") {
+            log::set_max_level(log::LevelFilter::Debug);
+        }
+
         let backend = match Backend::start() {
             Ok(backend) => backend,
             Err(error) => {

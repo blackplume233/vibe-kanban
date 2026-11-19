@@ -1,5 +1,22 @@
 # M4 交互核心交付报告
 
+## Win32 冷启动分段复核
+使用原隔离工作树和 5,005 条实际 SQLite 议题。后端和夹具在计时前就绪，同一夹具运行九个新建的 Release UI 进程。计时器从创建进程开始，通过 WinEvent 获取窗口显示事件，从 stderr 管道记录 HTTP 解码完成和首批议题可见。首批议题可见后只发送一次滚轮输入，以首次非零滚动偏移为响应。各样本前后检查编译进程，只接受 CPU 计数保持不变的两个闲置 `cl.exe`。有活跃编译时拒绝计时。
+
+| 阶段 | 最快 | 中位 | 最慢 |
+| --- | ---: | ---: | ---: |
+| 启动至窗口显示 | 187.8 ms | 196.0 ms | 217.8 ms |
+| 窗口显示至完整议题响应解码完成 | 255.0 ms | 383.5 ms | 567.2 ms |
+| 议题解码完成至首批议题可见 | 3.4 ms | 3.5 ms | 3.8 ms |
+| 发送滚轮至首个滚动事件 | 19.0 ms | 156.8 ms | 263.0 ms |
+| 启动至首个滚动事件 | 467.3 ms | 739.2 ms | 996.0 ms |
+
+九个样本均低于 1 秒。完整议题响应和滚轮派发贡献了主要波动。项目响应在窗口显示后 4.9–6.9 ms 完成，状态、周期和保存视图也都先于议题响应完成，因此保留现有数据加载逻辑。历史的 901.0 ms 和 1,250.5 ms 用整份日志轮询和重复输入测得。旧记录中的进程到窗口分别是 374.8 ms 和 490.1 ms，窗口到首滚分别是 526.2 ms 和 760.4 ms。旧日志没有保留足够精度的分段时间，无法把差值准确归因于某一次 API 或输入等待。
+
+独立 Chromium 回归通过 SQLite 写入和滚动检查。首次可操作耗时 482.2 ms，渲染切片 p95 为 2.132 ms，rAF 间隔 p95 为 19.50 ms。原生 Release 可执行文件 SHA-256 为 `55aa3eabdd653f9e3ba25da4c708f302ddcb1405688664ce89bb5fa69cf45a90`，取证使用 `cargo +1.99.1`。
+
+复现使用 `m4-runtime.py windows --cold-runs 9` 和该工作树构建的后端与 Release UI。[Win32 原始分段](../evidence/m4-native-cold-stages.json) · [Chromium 回归](../evidence/m4-cold-web-regression.json) · [Chromium 操作记录](../evidence/m4-cold-web-regression.log)
+
 ## 实现
 
 - `crates/nsh-app/src/issue_actions.rs` 定义可用字符串保存的 `ActionId`、动作标签和别名、作用域、快捷键提示，以及带类型的项目、议题、状态和工作区 ID。议题的引用同时携带项目 ID，可直接定位 M2 的 `/api/projects/{project_id}/issues/{issue_id}`。

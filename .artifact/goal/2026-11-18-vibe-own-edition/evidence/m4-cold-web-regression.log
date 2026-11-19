@@ -1,0 +1,16 @@
+Chromium error: Failed to load resource: the server responded with a status of 404 (File not found)
+01-keyboard-first 冷启动并用方向键和 Enter 打开 VO-1，482.2 ms
+02-keyboard-neighbor Escape 返回，再用方向键打开 VO-2
+03-workspace-query 用模糊查询打开项目和工作区
+04-issue-query 模糊查询并打开 VO-3
+05-create 在新建议题表单输入标题
+06-created 已从 SQLite 读取新建议题 VO-5006
+07-edit 在详情面板编辑标题
+08-edited UI 与 SQLite 均显示 M4 Comet compass edited
+09-move-menu 通过快捷键打开议题操作并跨状态移动
+10-board-before 拖拽前，可见两个状态列
+11-board-after 用真实指针拖拽并从 SQLite 核对目标状态
+12-cycle-view 右键菜单、分诊、周期分配及保存视图均已验证
+12-scroll-before 以实际议题列表为滚动目标
+13-scroll-after-raf 实际议题滚动 rAF p95 19.50 ms
+14-scroll-after-trace Chromium 渲染采样完成

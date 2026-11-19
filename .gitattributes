@@ -2,6 +2,9 @@
 *.sh text eol=lf
 /scripts/clang text eol=lf
 
+# The theme generator compares the generated configuration byte for byte.
+/crates/nsh-app/nsh.json text eol=lf
+
 # The type generator compares these files byte for byte.
 /shared/types.ts text eol=lf
 /shared/schemas/*.json text eol=lf
