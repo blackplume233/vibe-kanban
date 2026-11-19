@@ -21,9 +21,10 @@
 - 合入关闭修正和终端资源依赖后的隔离候选通过默认 `check`、`lint`、生成类型校验和 361 项工作区测试。两个目标的候选打包在同一工作树执行。
 - Win32 产品包通过跨列拖放，离线 API 读回目标状态。受信 ACP 节点通过 Windows 路径与取消用例、Ubuntu 真实 OpenSSH 握手和断连清理。
 - `6731b8402` 在本地 `my/main` 切换默认 NSH 构建并移除 sunset 页面，历史导出路由通过三个 TypeScript 检查。新 Web 包通过键盘复验。
+- 最终工作区测试通过 363 项，忽略 5 项。Win32 与 Chromium 包均显示真实日志和 diff，窗口与子进程均正常关闭。Web 全键盘提交创建了沙箱草稿 PR #4。
 
 ## 终止检查
 
 - decision: continue
-- reason: 双端交互、GitHub、ACP 和默认构建已实测。仍需关闭最终产物与工作区测试闸门。
-- remaining_evidence: 低并发工作区测试、最终 Win32 包和键盘联网提交。
+- reason: E1–E7 已验收，准备推送并读取远端分支。
+- remaining_evidence: 远端 `my/main` 读回。

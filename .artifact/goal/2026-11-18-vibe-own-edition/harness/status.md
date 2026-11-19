@@ -12,14 +12,14 @@
 
 | 里程碑 | 状态 | 下一步 |
 |---|---|---|
-| M0 基线 | in-progress | `my/main` 已采用 NSH 默认构建。检查、Clippy 和类型生成通过，工作区测试正以低并发复验。 |
+| M0 基线 | verified | 检查、Clippy、类型生成、363 项工作区测试和双端最终包通过。 |
 | M1 NSH Spike | verified | 锁定 nightly 构建的 Win32 与 Chrome 通过真实服务 HTTP、日志追加与 diff。Win32 `frame` p95 为 5.77 ms。 |
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
 | M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
 | M4 Linear 交互 | verified | Win32 拖放已落库，Chromium 键盘流程覆盖 Agent、日志、diff 和联网草稿 PR #4。 |
 | M5 GitHub 联动 | verified | 私有沙箱通过 Issue 往返、Codex 修复与推送、产品读回绿色检查，以及 Claude 文本模式自动续接。 |
 | M6 ACP 管理 | verified | 实际 ACP 用量、持久队列、MCP、Claude/Codex 会话续接有证据。受信节点通过 Windows 协议测试与 Ubuntu 回环 SSH 验收。 |
-| M7 对等与退役 | in-progress | NSH 默认入口和 sunset 页面移除已合入 `my/main`。历史导出路由的类型检查通过，正在复验发布包。 |
+| M7 对等与退役 | verified | 两个最终包均通过实机验收。默认构建切到 NSH，已移除 sunset 页面。 |
 
 ## Run
 
@@ -27,7 +27,7 @@
 
 ## Gate
 
-- [默认构建候选](../evidence/m0-build.md#集成候选复验) 已合入。新 Web 包已通过键盘探针。最终工作区测试及配套 Win32 包待复验。
+- [最终构建](../evidence/m0-build.md#集成候选复验)覆盖 363 项工作区测试、双端正式包和真实运行。
 - [共享产品包](../subagents/m7-package-report.md#共享产品入口复验)通过 Win32 和 Chrome 实机验收。
 - Win32 5,005 条议题首次滚动 721.6 ms，最高主线程帧耗时 p95 6.84 ms。Chromium 前台首次键盘操作 685.9 ms，渲染 p95 2.712 ms。见 [产品交互证据](../evidence/product-interaction.md)。
 - M6 协议升级在 `4cb6f061c` 通过 185 项测试，5 项忽略。单独复验 `session/new` 和 `session/load` 均从真实 MCP 进程发现 `list_repos`。M5 集成复验的 73 项测试及生成检查通过，原始日志为 `F:/vk-targets/main/m5-acp-integration.log`。

@@ -73,3 +73,7 @@ npm_config_script_shell="$(cygpath -w "$(type -P bash)")" pnpm run check
 集成至 `my/main` 的提交为 `6731b8402`。带受信 ACP 节点的集成候选已经通过格式化、Cargo 工作区检查、默认 `check`、`lint` 及类型生成校验。首次运行工作区测试时，Windows 因页文件不足返回 `os error 1455`，低并发复验见 `F:/vk-targets/main/final-e1-clean-tests-j2.log`。
 
 `pnpm run build:web` 生成 `F:/vk-targets/main/integrated-cutover-web/vibe-own/`，以同一候选的 standalone 服务托管。Chrome 键盘流程八步全通过。`index.html` SHA-256 为 `42c2bc673134d5aef751395f41dc1c74f9c6f98f21fb10cb16987078a8f0d298`，WASM SHA-256 为 `7f305be07be9eccd586a931a321e3123908777a746f313fa3b8624be083c60be`。根目录压缩副本全部解包并按字节匹配。
+
+锁定 nightly 在独立目标目录执行 `cargo test --jobs 2 --locked --workspace`，363 项通过、5 项忽略，退出 0。构建使用 `CARGO_INCREMENTAL=0`、`CARGO_PROFILE_TEST_DEBUG=0` 和本地离线缓存。原始日志为 `F:/vk-targets/main/final-e1-clean-tests-j2.log`。
+
+`pnpm run build:windows` 生成 `F:/vk-targets/main/final-windows/vibe-own.zip`。ZIP 内 11 项通过 CRC 校验，SHA-256 为 `eb7c1171b25d0da77a94a6523afab2c6cf7a55dd02d095f3e925ce66351e41e2`。`verify-packages.py` 用独立 SQLite 和 Git 工作树启动最终 Win32 包与对应 Web 包。双端显示实时日志与实际 diff，Chromium 建立 4 条同源 WebSocket。关闭 Win32 窗口后应用退出 0，API 端口关闭，子进程心跳停止。见 [Win32 截图](final-package-native.png) 与 [Web 截图](final-package-browser.png)。

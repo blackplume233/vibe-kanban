@@ -24,18 +24,28 @@
 
 | ID | 可观察结果 | 预期证据 | 依赖 | 状态 |
 |---|---|---|---|---|
-| M0 基线 | fork 在 `my/main` 上完整构建通过；Goal 目录已提交 | E1 中的 cargo check/test、pnpm check/lint 日志；首个提交 hash | 网络、工具链 | in-progress（锁定 nightly 的公开 `check` 与严格 Clippy 通过，Windows LF 检出修复已合入。完整 check 仍涉及私有 `billing`。） |
+| M0 基线 | fork 在 `my/main` 上完整构建通过，Goal 目录已提交 | E1 构建与测试日志 | 网络、工具链 | verified（默认检查、Clippy、生成校验、363 项工作区测试和双端包运行均通过。） |
 | M1 NSH Spike（路线闸门） | `crates/nsh-app` 在 Windows 原生窗口与浏览器中都能列工作区、看会话日志流、显示 diff | 两端截图；`--fps` 日志；switch_trigger 逐项判定记录 | M0、D4（LLVM） | verified（锁定 nightly 双端实机通过，Win32 `frame` p95 为 5.77 ms。见 `evidence/m1-gate.md`。） |
 | M2 本地议题底座 | 不设置 `VK_SHARED_API_BASE` 时议题 CRUD、状态、标签、子议题、关系全部在 SQLite 中可用；API 与类型生成通过 | 迁移 + `cargo test`；`generate-types:check`；API 调用记录 | M0、D1 | verified（真实本地 API 流程见 `evidence/m2-api.md`，集成分支 `db` 和 `server` 共 32 项测试、生成类型和严格 Clippy 通过。） |
 | M3 设计系统 | 单一 token JSON → NSH Tailwind 配置；主题生成（亮/暗、强调色）；舒适/紧凑密度；动效规范；组件展示页 | 展示页截图矩阵；`docs/design-system.md` | 组件接入依赖 M1 | verified（锁定 nightly 通过 Win32 与 Chromium 展示页复验。见 `evidence/m3-showcase.md`。） |
 | M4 Linear 级交互与议题能力 | NSH 中的看板/列表、拖拽、Cmd+K 模糊搜索、动作注册表、行内编辑、peek、triage、cycle、保存视图 | E2、E3 录屏与性能日志 | M2、M3 | verified（原生拖放已落库，Web 键盘流程与沙箱草稿提交通过。滚动和冷启动满足实测渲染预算。见 `evidence/product-interaction.md`。） |
 | M5 GitHub 联动 | CI 状态 + 一键修复、review 评论自动 follow-up、GraphQL 批量轮询、Issue 双向同步、PAT 认证 | E5 测试仓库演示记录 | Issue 双向同步依赖 M2 | verified（私有沙箱实测 CI 修复、Agent 推送、绿色检查读回、文本模式自动评审续接和 Issue 双向往返。见 `evidence/m5-sandbox.md`。） |
 | M6 ACP Agent 管理 | 用量/成本、全局调度器 + 持久队列、MCP 注入、Claude/Codex 统一 ACP、可选远程节点 | E6 测试与 API 输出 | M0 | verified（真实模型用量、队列恢复、MCP 和适配器续接通过。受信 SSH 节点经 Windows 协议测试及 Ubuntu 回环验证。见 `evidence/m6-acp.md`。） |
-| M7 对等与退役 | NSH 功能覆盖 React 版；终端面板可用；React 前端与 `crates/remote` 从默认构建移除；原生与 Web 发布包 | E1、E7；发布包路径与 hash | M4、M5、M6 | in-progress（正在验证正式 CLI 打包与原生内嵌服务。界面对等及退役等待依赖验收。） |
+| M7 对等与退役 | NSH 功能覆盖本地 React 工作流，终端可用，默认构建切换，原生与 Web 发布包 | E1、E7，发布包路径与哈希 | M4、M5、M6 | verified（工作区、终端、会话和设置已实测。默认构建使用 NSH，两个最终包均通过实机验收。） |
 
 M5、M6 与 M3/M4 可并行（后端与 UI 互不阻塞）。
 
-M0 的公开工作区检查、严格 Clippy 和锁定 nightly 的生成一致性已通过。M1 和 M2 已验证。E3 仍需测量产品议题列表与启动时长。
+E1–E7 通过终止审计。
+
+| 闸门 | 证据 |
+|---|---|
+| E1 构建 | [构建记录](evidence/m0-build.md#集成候选复验)记录检查、363 项测试及双端最终包的构建、哈希和运行结果。 |
+| E2 本地 | [交互验收](evidence/product-interaction.md)记录原生拖放、本地 Agent 日志和 diff，以及联网草稿 PR #3。 |
+| E3 交互 | [键盘与性能](evidence/product-interaction.md)记录议题至草稿 PR #4 的键盘操作、两端冷启动、渲染时间和浏览器呈现间隔。 |
+| E4 设计 | [组件展示](evidence/m3-showcase.md)记录主题、密度和两端截图，规范见 [设计系统](../../../docs/design-system.md)。 |
+| E5 GitHub | [私有沙箱](evidence/m5-sandbox.md)记录 Issue 双向同步、CI 修复转绿和自动评审续接。 |
+| E6 ACP | [本地与 SSH 验收](evidence/m6-acp.md)及[真实适配器](evidence/m6-real-adapters.md)记录用量、队列恢复、MCP 与会话恢复。 |
+| E7 退役 | `6731b8402` 将默认入口切到 NSH，移除 `ProjectSunsetPage`，默认 Cargo 工作区排除 `crates/remote`，旧数据导出页通过类型检查。 |
 
 ## 终止规则
 
@@ -47,8 +57,8 @@ M0 的公开工作区检查、严格 Clippy 和锁定 nightly 的生成一致性
 
 ## 终止记录
 
-- outcome: pending
-- reason:
-- evidence:
-- unresolved:
-- successor_goal:
+- outcome: verified，等待远端分支读回
+- reason: E1–E7 证据均已归档。363 项工作区测试通过，最终 Win32 与 Web 包已实机验证。
+- evidence: 上方 E1–E7 证据表
+- unresolved: 远程节点经回环 SSH 验证，跨主机挂载需按实际部署配置验证。
+- successor_goal: 无
