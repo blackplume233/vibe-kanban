@@ -238,15 +238,6 @@ impl CodingAgent {
                 self.preconfigured_mcp(),
                 false,
             ),
-            // No MCP config file yet; ACP passes MCP servers in session/new
-            Self::AcpServer(_) => McpConfig::new(
-                vec!["mcpServers".to_string()],
-                serde_json::json!({
-                    "mcpServers": {}
-                }),
-                self.preconfigured_mcp(),
-                false,
-            ),
             _ => McpConfig::new(
                 vec!["mcpServers".to_string()],
                 serde_json::json!({

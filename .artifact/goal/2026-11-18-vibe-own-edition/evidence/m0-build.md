@@ -39,3 +39,11 @@ npm_config_script_shell="$(cygpath -w "$(type -P bash)")" pnpm run check
 ```
 
 完整通过要求命令退出码为 0。若停在 `billing` Git 依赖的认证错误，说明公开工作区检查已通过，但完整检查仍受阻。
+
+## loop-004 锁定 nightly 复核
+
+- 经 USTC 镜像修复 `nightly-2026-08-01`，安装 Win32 与 `wasm32-unknown-unknown` 标准库及 Clippy。`cargo +nightly-2026-08-01 check --locked --workspace` 退出 0，日志为本机 `F:/vk-targets/main/m0-nightly-check.log`。
+- `rust-src` 首次安装遇到中断残留。保留冲突目录后补装 `rust-src` 和 `rust-analyzer`，在仓库根直接运行 `cargo --version` 与 `rustc --version` 均识别到锁定的 `1.99.0-nightly`。
+- 合入 Windows lint 修复与本地议题底座后，锁定 nightly 的公开工作区严格 Clippy 退出 101。诊断位于 `crates/services/src/services/analytics.rs`，详见本机 `F:/vk-targets/main/m0-m2-nightly-clippy.log`。完整根检查仍需处理 `crates/remote` 的私有 `billing` 依赖。
+- 合入 Windows `analytics.rs` 修复后，`cargo clippy --locked --workspace --all-targets --features qa-mode -- -D warnings` 退出 0，日志为本机 `F:/vk-targets/main/m0-m2-nightly-clippy-after.log`。
+- 锁定 nightly 的 M2 集成测试通过 `db` 8 项和 `server` 24 项。类型生成初次校验只因 Windows 检出换行失败。临时目录生成的所有文件逐字节等于仓库 LF 内容。合入 LF 检出规则后重建已有检出的生成文件，`generate_types --check` 退出 0。

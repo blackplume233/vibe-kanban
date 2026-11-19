@@ -2,6 +2,7 @@ pub mod client;
 pub mod discovery;
 pub mod harness;
 pub mod harness_v2;
+pub(super) mod mcp;
 pub mod normalize_logs;
 mod permissions;
 pub mod registry;
@@ -18,6 +19,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use session::SessionManager;
 use workspace_utils::approvals::ApprovalStatus;
 
+use crate::logs::ExecutionTokenUsage;
+
 /// Parsed event types for internal processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AcpEvent {
@@ -33,6 +36,7 @@ pub enum AcpEvent {
     /// Config in effect, a skipped setting, or a change the agent made itself
     /// ("Model: X · Mode: Agent · Permissions: Auto"). Shown as a system message.
     SessionConfig(String),
+    Usage(AcpUsageUpdate),
     RequestPermission(agent_client_protocol::RequestPermissionRequest),
     ApprovalRequested {
         tool_call_id: String,
@@ -45,6 +49,16 @@ pub enum AcpEvent {
     Error(String),
     Done(String),
     Other(agent_client_protocol::SessionNotification),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AcpUsageUpdate {
+    Context {
+        used: u64,
+        size: u64,
+        cost_usd: Option<f64>,
+    },
+    Prompt(ExecutionTokenUsage),
 }
 
 impl Display for AcpEvent {
@@ -91,6 +105,14 @@ impl TryFrom<acp::schema::v1::SessionNotification> for AcpEvent {
             SessionUpdate::CurrentModeUpdate(cmu) => {
                 to_v08(cmu.current_mode_id).map(AcpEvent::CurrentMode)
             }
+            SessionUpdate::UsageUpdate(usage) => Some(AcpEvent::Usage(AcpUsageUpdate::Context {
+                used: usage.used,
+                size: usage.size,
+                cost_usd: usage
+                    .cost
+                    .filter(|cost| cost.currency == "USD")
+                    .map(|cost| cost.amount),
+            })),
             _ => {
                 tracing::debug!("Unknown ACP Notification Update type {notification:?}");
                 None
@@ -243,12 +265,23 @@ mod tests {
     }
 
     #[test]
-    fn unmapped_update_is_ignored() {
-        let n = notif(json!({
-            "sessionUpdate": "usage_update",
-            "used": 12000,
-            "size": 200000
-        }));
-        assert!(AcpEvent::try_from(n).is_err());
+    fn usage_update_maps_context_and_usd_session_cost() {
+        for (currency, expected_cost_usd) in [("USD", Some(0.125)), ("EUR", None)] {
+            let n = notif(json!({
+                "sessionUpdate": "usage_update",
+                "used": 12000,
+                "size": 200000,
+                "cost": {"amount": 0.125, "currency": currency}
+            }));
+            let Ok(AcpEvent::Usage(AcpUsageUpdate::Context {
+                used,
+                size,
+                cost_usd,
+            })) = AcpEvent::try_from(n)
+            else {
+                panic!("expected a context usage event");
+            };
+            assert_eq!((used, size, cost_usd), (12000, 200000, expected_cost_usd));
+        }
     }
 }

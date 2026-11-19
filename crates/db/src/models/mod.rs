@@ -2,6 +2,8 @@ pub mod coding_agent_turn;
 pub mod execution_process;
 pub mod execution_process_logs;
 pub mod execution_process_repo_state;
+pub mod execution_queue;
+pub mod execution_usage;
 pub mod file;
 pub mod issue;
 pub mod issue_board;

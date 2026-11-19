@@ -210,6 +210,7 @@ fn generate_mock_logs(prompt: &str) -> Vec<String> {
             cwd: None,
             tools: None,
             model: Some("qa-mock-executor".to_string()),
+            claude_code_version: None,
             api_key_source: Some("unknown".to_string()),
             status: None,
             slash_commands: vec![],
@@ -382,6 +383,7 @@ fn generate_mock_logs(prompt: &str) -> Vec<String> {
             session_id: Some(session_id),
             model_usage: None,
             usage: None,
+            total_cost_usd: None,
         },
     ];
 
