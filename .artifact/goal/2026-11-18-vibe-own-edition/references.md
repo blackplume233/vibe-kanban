@@ -19,6 +19,8 @@
 - `nightly-2026-08-01` 安装中断后缺 manifest（`rustup component list` 报 missing manifest），每次 cargo 调用都会触发组件下载并卡在 TLS。仓库无 `#![feature]`、`.cargo/config.toml` 无 `-Z` 参数，因此改用已安装的 `cargo +1.99.1` 做 M0 检查；网络恢复后再补装 nightly 并复核。
 - `cargo check` 失败于 `libsqlite3-sys` 的 bindgen 找不到 libclang（`sqlx` 的 `sqlite-preupdate-hook` 特性 → `buildtime_bindgen`）。本机 VS 自带 LLVM：`C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/Llvm/x64/bin`（含 `libclang.dll`、`clang.exe`），设置 `LIBCLANG_PATH` 即可；D4 可能无需另装 LLVM（wasm32 目标支持待 M1 验证）。
 - corepack 在 Git Bash 下因 CRLF 脚本无法运行，改用全局 pnpm。
+- loop-004 恢复了锁定 nightly。通过 USTC 镜像安装工具链，保存上次中断时遗留的 `rust-src` 目录后补齐仓库声明的组件。公开工作区通过 `cargo +nightly-2026-08-01 check --locked --workspace`。
+- 从 `12af3d778b588c2837267ff6aaed678eb5ad72a2` 的提交快照用锁定 nightly 构建 `nsh-cli`，`nsh.exe --version` 输出 `nsh 0.4.0`。工具位于本机 `F:/vk-targets/main/nsh-cli/debug/nsh.exe`。两端正式包需在集成后的应用目录用该工具创建。
 
 ## 错误路径
 
