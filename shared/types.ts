@@ -679,7 +679,11 @@ export type QwenCode = { append_prompt: AppendPrompt, model?: string | null, age
 
 export type Droid = { append_prompt: AppendPrompt, autonomy: Autonomy, model?: string | null, reasoning_effort?: DroidReasoningEffort | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
 
-export type AcpServer = { registry_id: string, append_prompt: AppendPrompt, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
+export type AcpServer = { registry_id: string,
+/**
+ * Name in the local `VK_ACP_TRUSTED_NODES_FILE` allowlist.
+ */
+trusted_node?: string | null, append_prompt: AppendPrompt, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
 
 export type Autonomy = "normal" | "low" | "medium" | "high" | "skip-permissions-unsafe";
 

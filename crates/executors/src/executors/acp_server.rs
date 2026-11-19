@@ -24,6 +24,7 @@ use crate::{
             mcp, registry,
             registry::{npx_command, registry_key},
             session_config::DesiredConfig,
+            trusted_node,
         },
     },
     model_selector::PermissionPolicy,
@@ -40,6 +41,9 @@ pub struct AcpServer {
         extend("readOnly" = true)
     )]
     pub registry_id: String,
+    /// Name in the local `VK_ACP_TRUSTED_NODES_FILE` allowlist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_node: Option<String>,
     #[serde(default)]
     pub append_prompt: AppendPrompt,
     #[serde(flatten)]
@@ -69,6 +73,11 @@ impl StandardCodingAgentExecutor for AcpServer {
         prompt: &str,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
+        if let Some(node) = &self.trusted_node {
+            return self
+                .spawn_on_node(node, current_dir, prompt, None, env)
+                .await;
+        }
         let (combined_prompt, command, env) = self.build_spawn_args(prompt, env).await?;
 
         let command = command.build_initial()?;
@@ -93,6 +102,16 @@ impl StandardCodingAgentExecutor for AcpServer {
         _reset_to_message_id: Option<&str>,
         env: &ExecutionEnv,
     ) -> Result<SpawnedChild, ExecutorError> {
+        if let Some(node) = &self.trusted_node {
+            return self
+                .spawn_on_node(node, current_dir, prompt, Some(session_id), env)
+                .await;
+        }
+        if trusted_node::is_remote_session(session_id) {
+            return Err(ExecutorError::FollowUpNotSupported(
+                "Select the trusted ACP node that created this session".into(),
+            ));
+        }
         let (combined_prompt, command, env) = self.build_spawn_args(prompt, env).await?;
 
         let command = command.build_follow_up(&[])?;
@@ -111,11 +130,16 @@ impl StandardCodingAgentExecutor for AcpServer {
     }
 
     fn default_mcp_config_path(&self) -> Option<PathBuf> {
-        Some(mcp::config_path(&asset_dir(), &self.registry_id))
+        self.trusted_node
+            .is_none()
+            .then(|| mcp::config_path(&asset_dir(), &self.registry_id))
     }
 
     /// Installed means present in profiles: npx downloads the agent on first run
     fn get_availability_info(&self) -> AvailabilityInfo {
+        if self.trusted_node.is_some() && std::env::var_os("VK_ACP_TRUSTED_NODES_FILE").is_none() {
+            return AvailabilityInfo::NotFound;
+        }
         AvailabilityInfo::InstallationFound
     }
 
@@ -132,11 +156,19 @@ impl StandardCodingAgentExecutor for AcpServer {
         _workdir: Option<&Path>,
         _repo_path: Option<&Path>,
     ) -> Result<futures::stream::BoxStream<'static, json_patch::Patch>, ExecutorError> {
+        if self.trusted_node.is_some() {
+            return Ok(Box::pin(futures::stream::once(async {
+                crate::logs::utils::patch::executor_discovered_options(Default::default())
+            })));
+        }
         Ok(discovery::discover(self.discovery_spec().await?))
     }
 
     /// Needs only the cache key, so it reads neither the registry nor the network.
     async fn warm_options_cache(&self) {
+        if self.trusted_node.is_some() {
+            return;
+        }
         discovery::warm(discovery::cache_key(
             &registry_key(&self.registry_id),
             &self.key_input(),
@@ -161,11 +193,34 @@ impl AcpServer {
     pub fn new(registry_id: impl Into<String>) -> Self {
         Self {
             registry_id: registry_id.into(),
+            trusted_node: None,
             append_prompt: AppendPrompt::default(),
             config: DesiredConfig::default(),
             approvals: None,
             cmd: CmdOverrides::default(),
         }
+    }
+
+    async fn spawn_on_node(
+        &self,
+        node: &str,
+        current_dir: &Path,
+        prompt: &str,
+        session_id: Option<&str>,
+        env: &ExecutionEnv,
+    ) -> Result<SpawnedChild, ExecutorError> {
+        AcpAgentHarnessV2::new()
+            .with_config(self.desired_config())
+            .spawn_trusted_node(
+                node,
+                &self.registry_id,
+                current_dir,
+                self.append_prompt.combine_prompt(prompt),
+                session_id,
+                env,
+                self.approvals.clone(),
+            )
+            .await
     }
 
     fn session_harness(&self) -> AcpAgentHarnessV2 {
