@@ -183,6 +183,27 @@ impl StoredFollowUp {
         .await
     }
 
+    pub async fn save_if_running_and_empty(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        data: DraftFollowUpData,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            "INSERT INTO execution_follow_ups (session_id, payload, queued_at, revision)
+             SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (
+                 SELECT 1 FROM execution_processes
+                 WHERE session_id = ?1 AND status = 'running' AND run_reason = 'codingagent'
+             ) ON CONFLICT(session_id) DO NOTHING",
+        )
+        .bind(session_id)
+        .bind(sqlx::types::Json(data))
+        .bind(Utc::now())
+        .bind(Uuid::new_v4())
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() != 0)
+    }
+
     pub async fn get(pool: &SqlitePool, session_id: Uuid) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as("SELECT session_id, payload, queued_at, revision FROM execution_follow_ups WHERE session_id = ?")
             .bind(session_id)
@@ -226,8 +247,9 @@ impl StoredFollowUp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use executors::{executors::BaseCodingAgent, profile::ExecutorConfig};
+
+    use super::*;
 
     async fn seed_execution(pool: &SqlitePool) -> (Uuid, Uuid) {
         let workspace = Uuid::new_v4();
@@ -247,6 +269,50 @@ mod tests {
         sqlx::query("INSERT INTO execution_processes (id, session_id, run_reason) VALUES (?, ?, 'codingagent')")
             .bind(execution).bind(session).execute(pool).await.unwrap();
         (session, execution)
+    }
+
+    #[sqlx::test]
+    async fn generated_follow_up_preserves_existing_message(pool: SqlitePool) {
+        let (session, execution) = seed_execution(&pool).await;
+        let draft = |message: &str| DraftFollowUpData {
+            message: message.to_owned(),
+            executor_config: ExecutorConfig::new(BaseCodingAgent::codex()),
+        };
+        StoredFollowUp::save(&pool, session, draft("editor message"))
+            .await
+            .unwrap();
+        assert!(
+            !StoredFollowUp::save_if_running_and_empty(&pool, session, draft("CI"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            StoredFollowUp::get(&pool, session)
+                .await
+                .unwrap()
+                .unwrap()
+                .payload
+                .0
+                .message,
+            "editor message"
+        );
+        StoredFollowUp::delete(&pool, session, None).await.unwrap();
+        assert!(
+            StoredFollowUp::save_if_running_and_empty(&pool, session, draft("CI"))
+                .await
+                .unwrap()
+        );
+        StoredFollowUp::delete(&pool, session, None).await.unwrap();
+        sqlx::query("UPDATE execution_processes SET status = 'completed' WHERE id = ?")
+            .bind(execution)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            !StoredFollowUp::save_if_running_and_empty(&pool, session, draft("CI"))
+                .await
+                .unwrap()
+        );
     }
 
     #[sqlx::test]

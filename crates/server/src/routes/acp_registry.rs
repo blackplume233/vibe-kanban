@@ -185,6 +185,22 @@ mod tests {
     }
 
     #[test]
+    fn claude_and_codex_acp_profiles_coexist_with_native_keys() {
+        for (id, native) in [
+            ("claude-acp", BaseCodingAgent::claude_code()),
+            ("codex-acp", BaseCodingAgent::codex()),
+        ] {
+            let key = registry_key(id);
+            let before = ExecutorConfigs::from_defaults();
+            let profiles = with_registry_agent(key.as_str(), id);
+
+            assert_ne!(key, native);
+            assert_eq!(profiles.executors[&native], before.executors[&native]);
+            assert_eq!(registry_install_key(&profiles, id), Some(key));
+        }
+    }
+
+    #[test]
     fn registry_install_key_ignores_key_collisions() {
         // "some.agent" and "some-agent" both map to SOME_AGENT
         let profiles = with_registry_agent("SOME_AGENT", "some-agent");

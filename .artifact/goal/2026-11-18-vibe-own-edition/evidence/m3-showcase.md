@@ -1,5 +1,9 @@
 # M3 设计展示页 · 双端证据
 
+## 集成复验
+
+在 `ced0abaf4` 的独立工作树中通过 Windows Git Bash 执行上述命令，退出码为 `0`。两端分别生成 8 张截图，Chromium 操作检查通过。日志位于 `F:/vk-targets/main/m3-showcase/verification.log`。正式包的主题和字体接入由 E1 复验。
+
 Win32 和 Chromium 挂载同一个 `DesignShowcase` Rust 组件，使用同一组议题、token、字体及状态。展示页提供看板和列表、议题检查栏、标题编辑、命令菜单、外观切换、密度切换以及空态和保存错误示例。
 
 ## 复现

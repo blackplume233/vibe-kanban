@@ -10,29 +10,27 @@ use std::{
 };
 
 use acp::{
-    Agent, ByteStreams, ConnectionTo, UntypedMessage,
+    Agent, Client, ConnectTo, ConnectionTo, Lines, UntypedMessage,
     schema::{
         ProtocolVersion,
         v1::{
-            CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, McpServer,
-            NewSessionRequest, PromptRequest, PromptResponse, RequestPermissionRequest,
-            SessionNotification, SessionUpdate, StopReason, TextContent,
+            CancelNotification, ContentBlock, InitializeRequest, InitializeResponse,
+            LoadSessionRequest, McpServer, NewSessionRequest, PromptRequest, PromptResponse,
+            RequestPermissionRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
         },
     },
 };
 use async_trait::async_trait;
 use command_group::AsyncGroupChild;
+use futures::AsyncBufReadExt as _;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncWrite, AsyncWriteExt},
     process::Command,
     sync::{mpsc, mpsc::UnboundedSender},
 };
-use tokio_util::{
-    compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt},
-    sync::CancellationToken,
-};
+use tokio_util::{compat::TokioAsyncReadCompatExt, sync::CancellationToken};
 use workspace_utils::command_ext::GroupSpawnNoWindowExt;
 
 use crate::{
@@ -46,8 +44,8 @@ use crate::{
             AcpEvent, AcpUsageUpdate, SessionManager,
             permissions::{ask_user, auto_approve},
             session_config::{
-                ConfigSink, ConfigValue, DesiredConfig, SessionOptions, apply_config,
-                describe_changes, summary,
+                ConfigSink, ConfigValue, DesiredConfig, SessionOptions, Setter, apply_config,
+                describe_changes, set_value, summary,
             },
         },
     },
@@ -60,6 +58,7 @@ use crate::{
 pub struct AcpAgentHarnessV2 {
     config: DesiredConfig,
     legacy_namespace: Option<String>,
+    client_transcript_namespace: Option<String>,
     discovery_key: Option<ExecutorConfigCacheKey>,
     mcp_config_path: Option<PathBuf>,
 }
@@ -127,6 +126,15 @@ impl AcpAgentHarnessV2 {
         self
     }
 
+    /// Keep a local transcript and fork it for each follow-up, opening a fresh agent session.
+    pub(in crate::executors) fn with_client_transcript(
+        mut self,
+        namespace: impl Into<String>,
+    ) -> Self {
+        self.client_transcript_namespace = Some(namespace.into());
+        self
+    }
+
     pub fn with_discovery_key(mut self, key: ExecutorConfigCacheKey) -> Self {
         self.discovery_key = Some(key);
         self
@@ -170,33 +178,16 @@ impl AcpAgentHarnessV2 {
         cmd_overrides: &CmdOverrides,
         approvals: Option<std::sync::Arc<dyn ExecutorApprovalService>>,
     ) -> Result<SpawnedChild, ExecutorError> {
-        let mcp_servers =
-            super::mcp::read_servers(self.mcp_config_path.as_deref(), current_dir).await?;
-        let env_vars = env.clone().with_profile(cmd_overrides).vars;
-        let mut child = spawn_acp_process(current_dir, command_parts, &env_vars).await?;
-
-        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<ExecutorExitResult>();
-        let cancel = CancellationToken::new();
-
-        Self::bootstrap_acp_connection(
-            &mut child,
-            current_dir.to_path_buf(),
-            None,
+        self.spawn_turn(
+            current_dir,
             prompt,
-            Some(exit_tx),
-            self.config.clone(),
-            self.discovery_key.clone(),
-            mcp_servers,
+            None,
+            command_parts,
+            env,
+            cmd_overrides,
             approvals,
-            cancel.clone(),
         )
-        .await?;
-
-        Ok(SpawnedChild {
-            child,
-            exit_signal: Some(exit_rx),
-            cancel: Some(cancel),
-        })
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -210,21 +201,52 @@ impl AcpAgentHarnessV2 {
         cmd_overrides: &CmdOverrides,
         approvals: Option<std::sync::Arc<dyn ExecutorApprovalService>>,
     ) -> Result<SpawnedChild, ExecutorError> {
-        // Conversations started by the pre-V2 harness store our own id, which the agent can't
-        // session/load. Start a new session and send the stored history inside the prompt instead.
-        let legacy = self
-            .legacy_namespace
+        self.spawn_turn(
+            current_dir,
+            prompt,
+            Some(session_id),
+            command_parts,
+            env,
+            cmd_overrides,
+            approvals,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_turn(
+        &self,
+        current_dir: &Path,
+        prompt: String,
+        session_id: Option<&str>,
+        command_parts: CommandParts,
+        env: &ExecutionEnv,
+        cmd_overrides: &CmdOverrides,
+        approvals: Option<Arc<dyn ExecutorApprovalService>>,
+    ) -> Result<SpawnedChild, ExecutorError> {
+        let client_transcript = self
+            .client_transcript_namespace
             .as_deref()
-            .and_then(|ns| {
+            .map(SessionManager::new)
+            .transpose()
+            .map_err(ExecutorError::Io)?
+            .map(Arc::new);
+        // Copilot conversations started by the pre-V2 harness store our own id, which the agent
+        // can't session/load. Start a new session and send the stored history in the prompt.
+        let legacy = session_id
+            .filter(|_| client_transcript.is_none())
+            .and_then(|id| {
+                let ns = self.legacy_namespace.as_deref()?;
                 SessionManager::new(ns)
                     .inspect_err(|e| {
                         tracing::warn!("Failed to open legacy session store {ns}: {e}")
                     })
                     .ok()
-            })
-            .filter(|sm| sm.has_session(session_id));
+                    .filter(|sm| sm.has_session(id))
+                    .map(|sm| (sm, id))
+            });
         let (existing_session, prompt_to_send) = match legacy {
-            Some(sm) => {
+            Some((sm, session_id)) => {
                 tracing::debug!(
                     "Found legacy session with id {session_id}, generating resume prompt"
                 );
@@ -237,7 +259,7 @@ impl AcpAgentHarnessV2 {
 
                 (None, resume_prompt)
             }
-            None => (Some(session_id.to_string()), prompt),
+            None => (session_id.map(str::to_owned), prompt),
         };
 
         let mcp_servers =
@@ -257,10 +279,10 @@ impl AcpAgentHarnessV2 {
             self.config.clone(),
             self.discovery_key.clone(),
             mcp_servers,
+            client_transcript,
             approvals,
             cancel.clone(),
-        )
-        .await?;
+        )?;
 
         Ok(SpawnedChild {
             child,
@@ -270,7 +292,7 @@ impl AcpAgentHarnessV2 {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn bootstrap_acp_connection(
+    fn bootstrap_acp_connection(
         child: &mut AsyncGroupChild,
         cwd: PathBuf,
         existing_session: Option<String>,
@@ -279,25 +301,23 @@ impl AcpAgentHarnessV2 {
         config: DesiredConfig,
         discovery_key: Option<ExecutorConfigCacheKey>,
         mcp_servers: Vec<McpServer>,
+        client_transcript: Option<Arc<SessionManager>>,
         approvals: Option<Arc<dyn ExecutorApprovalService>>,
         cancel: CancellationToken,
     ) -> Result<(), ExecutorError> {
-        let transport = take_transport(child)?;
+        // Older ACP agents can require CRLF on Windows.
+        let record_client_transcript = client_transcript.is_some();
+        let line_ending = if cfg!(windows) && record_client_transcript {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        let transport = take_transport_with_line_ending(child, line_ending)?;
 
         // Create a fresh stdout pipe for logs
-        let mut writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
-        let (log_tx, mut log_rx) = mpsc::unbounded_channel::<String>();
-
-        // Spawn log -> stdout writer task
-        let log_writer = tokio::spawn(async move {
-            while let Some(line) = log_rx.recv().await {
-                let mut data = line.into_bytes();
-                data.push(b'\n');
-                if writer.write_all(&data).await.is_err() {
-                    break;
-                }
-            }
-        });
+        let writer = crate::stdout_dup::create_stdout_pipe_writer(child)?;
+        let (log_tx, log_rx) = mpsc::unbounded_channel::<String>();
+        let log_writer = tokio::spawn(write_logs(writer, log_rx, client_transcript.clone()));
 
         let shared = SessionShared {
             log_tx: log_tx.clone(),
@@ -352,6 +372,10 @@ impl AcpAgentHarnessV2 {
                         let approvals = match approvals.clone() {
                             Some(approvals) if !auto_approve_requests => approvals,
                             _ => {
+                                if record_client_transcript {
+                                    permission_shared
+                                        .send(AcpEvent::RequestPermission(request.clone()));
+                                }
                                 let _ = responder.respond(auto_approve(&request));
                                 return Ok(());
                             }
@@ -384,6 +408,7 @@ impl AcpAgentHarnessV2 {
                         config,
                         shared,
                         mcp_servers,
+                        client_transcript.as_deref(),
                     )
                     .await
                 })
@@ -406,6 +431,47 @@ impl AcpAgentHarnessV2 {
         });
 
         Ok(())
+    }
+}
+
+async fn write_logs(
+    writer: impl AsyncWrite,
+    mut log_rx: mpsc::UnboundedReceiver<String>,
+    transcript: Option<Arc<SessionManager>>,
+) {
+    tokio::pin!(writer);
+    let mut display_id: Option<String> = None;
+    let mut before_start: Vec<String> = Vec::new();
+    let mut stdout_open = true;
+    while let Some(mut line) = log_rx.recv().await {
+        if let Some(store) = &transcript {
+            if let Some(id) = &display_id {
+                append_transcript(store, id, &line);
+            } else if let Ok(AcpEvent::SessionStart(id)) = line.parse() {
+                for pending in before_start.drain(..) {
+                    append_transcript(store, &id, &pending);
+                }
+                display_id = Some(id);
+            }
+        }
+        if stdout_open {
+            let end = line.len();
+            line.push('\n');
+            stdout_open = writer.write_all(line.as_bytes()).await.is_ok();
+            if !stdout_open && transcript.is_none() {
+                break;
+            }
+            line.truncate(end);
+        }
+        if transcript.is_some() && display_id.is_none() {
+            before_start.push(line);
+        }
+    }
+}
+
+fn append_transcript(store: &SessionManager, id: &str, line: &str) {
+    if let Err(err) = store.append_raw_line(id, line) {
+        tracing::warn!("Failed to append ACP session {id} to disk: {err}");
     }
 }
 
@@ -435,13 +501,14 @@ pub(crate) async fn spawn_acp_process(
 /// Takes the child's stdin/stdout as the ACP transport.
 pub(crate) fn take_transport(
     child: &mut AsyncGroupChild,
-) -> Result<
-    ByteStreams<
-        tokio_util::compat::Compat<tokio::process::ChildStdin>,
-        tokio_util::compat::Compat<tokio::process::ChildStdout>,
-    >,
-    ExecutorError,
-> {
+) -> Result<impl ConnectTo<Client> + use<>, ExecutorError> {
+    take_transport_with_line_ending(child, "\n")
+}
+
+fn take_transport_with_line_ending(
+    child: &mut AsyncGroupChild,
+    line_ending: &'static str,
+) -> Result<impl ConnectTo<Client> + use<>, ExecutorError> {
     let orig_stdout = child.inner().stdout.take().ok_or_else(|| {
         ExecutorError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -454,24 +521,47 @@ pub(crate) fn take_transport(
             "Child process has no stdin",
         ))
     })?;
-    // The agent's stdin is where WE write; its stdout is where WE read.
-    // .compat*() adapts tokio's I/O traits to the futures traits the ACP SDK expects.
-    Ok(ByteStreams::new(
-        orig_stdin.compat_write(),
-        orig_stdout.compat(),
-    ))
+    let incoming = futures::io::BufReader::new(orig_stdout.compat()).lines();
+    let outgoing =
+        futures::sink::unfold(orig_stdin, move |mut stdin, mut line: String| async move {
+            line.push_str(line_ending);
+            stdin.write_all(line.as_bytes()).await?;
+            stdin.flush().await?;
+            Ok::<_, std::io::Error>(stdin)
+        });
+    Ok(Lines::new(outgoing, incoming))
 }
 
 pub(crate) async fn initialize(
     connection: &ConnectionTo<Agent>,
-) -> Result<acp::schema::v1::InitializeResponse, acp::Error> {
+) -> Result<InitializeResponse, acp::Error> {
+    initialize_agent(connection, false).await
+}
+
+async fn initialize_agent(
+    connection: &ConnectionTo<Agent>,
+    tolerate_legacy_response: bool,
+) -> Result<InitializeResponse, acp::Error> {
     tracing::debug!("🤝 Initializing agent...");
-    let init_response = with_timeout(
-        "initialize",
-        connection
+    let init_response = with_timeout("initialize", async {
+        let response = connection
             .send_request(InitializeRequest::new(ProtocolVersion::V1))
-            .block_task(),
-    )
+            .block_task()
+            .await;
+        match response {
+            Err(err)
+                if tolerate_legacy_response
+                    && err.code != acp::ErrorCode::AuthRequired
+                    && !acp::is_incoming_transport_closed(&err) =>
+            {
+                // Old clients continued to session/new after an unusable initialize reply.
+                // Keep that behavior without assuming any optional agent capabilities.
+                tracing::debug!("Legacy ACP initialize failed: {err}");
+                Ok(InitializeResponse::new(ProtocolVersion::V1))
+            }
+            result => result,
+        }
+    })
     .await?;
     tracing::debug!("✓ Agent initialized: {:?}", init_response.agent_info);
     Ok(init_response)
@@ -485,7 +575,7 @@ pub(crate) async fn open_session(
     existing: Option<String>,
     cwd: PathBuf,
 ) -> Result<(String, SessionOptions), acp::Error> {
-    open_session_with_mcp(connection, existing, cwd, Vec::new()).await
+    open_session_with_mcp(connection, existing, cwd, Vec::new(), None).await
 }
 
 async fn open_session_with_mcp(
@@ -493,6 +583,7 @@ async fn open_session_with_mcp(
     existing: Option<String>,
     cwd: PathBuf,
     mcp_servers: Vec<McpServer>,
+    history: Option<String>,
 ) -> Result<(String, SessionOptions), acp::Error> {
     match existing {
         Some(session_id) => {
@@ -511,10 +602,14 @@ async fn open_session_with_mcp(
         }
         None => {
             tracing::debug!("📝 Creating new session...");
-            let request = UntypedMessage::new(
-                "session/new",
-                NewSessionRequest::new(cwd).mcp_servers(mcp_servers),
-            )?;
+            let mut request = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
+            if let Some(history) = history {
+                request = request.meta(serde_json::Map::from_iter([(
+                    "history_jsonl".to_owned(),
+                    Value::String(history),
+                )]));
+            }
+            let request = UntypedMessage::new("session/new", request)?;
             let response = with_timeout(
                 "create a new session",
                 connection.send_request(request).block_task(),
@@ -597,6 +692,7 @@ fn prompt_usage(usage: &Value) -> Option<ExecutionTokenUsage> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_session(
     connection: ConnectionTo<Agent>,
     existing_session: Option<String>,
@@ -605,8 +701,9 @@ async fn run_session(
     config: DesiredConfig,
     shared: SessionShared,
     mut mcp_servers: Vec<McpServer>,
+    client_transcript: Option<&SessionManager>,
 ) -> Result<(), acp::Error> {
-    let init_response = initialize(&connection).await?;
+    let init_response = initialize_agent(&connection, client_transcript.is_some()).await?;
 
     let capabilities = &init_response.agent_capabilities.mcp_capabilities;
     let configured = mcp_servers.len();
@@ -618,6 +715,25 @@ async fn run_session(
     });
     let skipped = configured - mcp_servers.len();
 
+    let mut existing_session = existing_session;
+    let mut display_id = None;
+    let mut history = None;
+    let mut resume_prompt = None;
+    if let Some(store) = client_transcript
+        && let Some(parent_id) = existing_session.take()
+    {
+        let fork_id = uuid::Uuid::new_v4().to_string();
+        store
+            .fork_session(&parent_id, &fork_id)
+            .map_err(acp::util::internal_error)?;
+        let raw = store
+            .read_session_raw(&fork_id)
+            .map_err(acp::util::internal_error)?;
+        resume_prompt = Some(SessionManager::resume_prompt(&raw, &prompt));
+        display_id = Some(fork_id);
+        history = Some(raw);
+    }
+
     if existing_session.is_some() {
         if !init_response.agent_capabilities.load_session {
             return Err(acp::util::internal_error(
@@ -626,21 +742,44 @@ async fn run_session(
         }
         shared.replaying.store(true, Ordering::SeqCst);
     }
-    let opened = open_session_with_mcp(&connection, existing_session, cwd, mcp_servers).await;
+    let opened =
+        open_session_with_mcp(&connection, existing_session, cwd, mcp_servers, history).await;
     shared.replaying.store(false, Ordering::SeqCst);
     let (session_id, mut options) = opened?;
     if let Some(key) = &shared.discovery_key {
         super::discovery::forget_failure(key);
     }
 
-    shared.send(AcpEvent::SessionStart(session_id.clone()));
+    shared.send(AcpEvent::SessionStart(
+        display_id.unwrap_or_else(|| session_id.clone()),
+    ));
+    // Record the user's actual input once. The resume wrapper is only for the agent.
+    let prompt = if client_transcript.is_some() {
+        if let Some(resume_prompt) = resume_prompt {
+            shared.send(AcpEvent::User(prompt));
+            resume_prompt
+        } else {
+            shared.send(AcpEvent::User(prompt.clone()));
+            prompt
+        }
+    } else {
+        prompt
+    };
     if skipped > 0 {
         shared.send(AcpEvent::SessionConfig(format!(
             "Skipped {skipped} MCP server(s) because the agent does not support their transport."
         )));
     }
 
-    apply_session_config(&connection, &session_id, &mut options, &config, &shared).await;
+    apply_session_config(
+        &connection,
+        &session_id,
+        &mut options,
+        config,
+        &shared,
+        client_transcript.is_some(),
+    )
+    .await;
 
     // Denial feedback is delivered after the turn ends. Some agents (Copilot) end their turn on
     // rejection; others may keep working first, so for them the feedback can arrive late.
@@ -716,14 +855,42 @@ async fn apply_session_config(
     connection: &ConnectionTo<Agent>,
     session_id: &str,
     options: &mut SessionOptions,
-    config: &DesiredConfig,
+    mut config: DesiredConfig,
     shared: &SessionShared,
+    allow_unadvertised: bool,
 ) {
     let mut sink = ConnectionSink {
         connection,
         session_id: session_id.to_string(),
     };
-    let outcome = apply_config(options, config, &mut sink).await;
+    // Older Gemini/Qwen agents accept the v1 setters without advertising their options.
+    if allow_unadvertised
+        && let Some(model) = config.model.as_deref()
+        && options
+            .model_slot()
+            .is_none_or(|slot| slot.setter == Setter::SetModel && slot.choices.is_empty())
+    {
+        if let Err(err) = set_value(options, &Setter::SetModel, model, &mut sink).await {
+            tracing::warn!("Couldn't switch the ACP model to {model}: {err}");
+        }
+        config.model = None;
+    }
+    let legacy_mode = if allow_unadvertised
+        && config.mode.is_some()
+        && options
+            .mode_slot()
+            .is_none_or(|slot| slot.setter == Setter::SetMode && slot.choices.is_empty())
+    {
+        config.mode.take()
+    } else {
+        None
+    };
+    let outcome = apply_config(options, &config, &mut sink).await;
+    if let Some(mode) = legacy_mode
+        && let Err(err) = set_value(options, &Setter::SetMode, &mode, &mut sink).await
+    {
+        tracing::warn!("Couldn't switch to ACP mode {mode}: {err}");
+    }
     for warning in &outcome.warnings {
         tracing::warn!("ACP session config: {warning}");
     }
@@ -768,6 +935,7 @@ mod mcp_requests {
     use acp::{Channel, TransportFrame};
     use futures::StreamExt;
     use serde_json::json;
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
     use super::*;
     use crate::executors::acp::mcp;
@@ -793,8 +961,9 @@ mod mcp_requests {
         existing: Option<&str>,
         mcp_capabilities: Value,
         mcp_servers: Vec<McpServer>,
+        discover_tools: bool,
     ) -> (Value, Vec<AcpEvent>) {
-        tokio::time::timeout(Duration::from_secs(5), async move {
+        tokio::time::timeout(Duration::from_secs(15), async move {
             let (transport, mut peer) = Channel::duplex();
             let (log_tx, mut log_rx) = mpsc::unbounded_channel();
             let shared = SessionShared {
@@ -818,6 +987,7 @@ mod mcp_requests {
                         DesiredConfig::default(),
                         shared,
                         mcp_servers,
+                        None,
                     )
                     .await
                 },
@@ -838,6 +1008,16 @@ mod mcp_requests {
             );
 
             let session = receive(&mut peer).await;
+            if discover_tools {
+                let descriptor = &session["params"]["mcpServers"][0];
+                assert_eq!(descriptor["name"], "vibe-kanban");
+                let tools = discover_stdio_tools(descriptor).await;
+                assert!(tools.iter().any(|tool| tool["name"] == "list_repos"));
+                eprintln!(
+                    "{} -> MCP tools/list contains list_repos",
+                    session["method"]
+                );
+            }
             let session_id = existing.unwrap_or("new-id");
             let result = if existing.is_some() {
                 json!({})
@@ -877,6 +1057,93 @@ mod mcp_requests {
         .expect("ACP session request timed out")
     }
 
+    async fn discover_stdio_tools(descriptor: &Value) -> Vec<Value> {
+        let mut child = Command::new(descriptor["command"].as_str().unwrap())
+            .args(
+                descriptor["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|arg| arg.as_str().unwrap()),
+            )
+            .envs(descriptor["env"].as_array().unwrap().iter().map(|entry| {
+                (
+                    entry["name"].as_str().unwrap(),
+                    entry["value"].as_str().unwrap(),
+                )
+            }))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+        let write = async |stdin: &mut tokio::process::ChildStdin, message: Value| {
+            stdin
+                .write_all(format!("{message}\n").as_bytes())
+                .await
+                .unwrap();
+        };
+        write(
+            &mut stdin,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "protocolVersion": "2025-03-26", "capabilities": {},
+                    "clientInfo": {"name": "acp-test-agent", "version": "1"} }
+            }),
+        )
+        .await;
+        let init: Value =
+            serde_json::from_str(&stdout.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(init["id"], 1);
+        assert_eq!(init["result"]["serverInfo"]["name"], "vibe-kanban-mcp");
+        write(
+            &mut stdin,
+            json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+        )
+        .await;
+        write(
+            &mut stdin,
+            json!({"jsonrpc":"2.0", "id":2, "method":"tools/list"}),
+        )
+        .await;
+        let list: Value =
+            serde_json::from_str(&stdout.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(list["id"], 2);
+        drop(stdin);
+        assert!(child.wait().await.unwrap().success());
+        list["result"]["tools"].as_array().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires VK_TEST_MCP_BIN pointing to the built vibe-kanban-mcp binary"]
+    async fn new_and_loaded_sessions_discover_local_mcp_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = mcp::config_path(dir.path(), "test/local-mcp");
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        let command =
+            PathBuf::from(std::env::var_os("VK_TEST_MCP_BIN").expect("set VK_TEST_MCP_BIN"));
+        let config = json!({"mcpServers": {"vibe-kanban": {
+            "command": command, "args": ["--mode", "global"],
+            "env": {"VIBE_BACKEND_URL": "http://127.0.0.1:1"}
+        }}});
+        tokio::fs::write(&path, config.to_string()).await.unwrap();
+        for (existing, method) in [(None, "session/new"), (Some("new-id"), "session/load")] {
+            let servers = mcp::read_servers(Some(&path), dir.path()).await.unwrap();
+            let (request, _) =
+                capture_session_request(dir.path().to_owned(), existing, json!({}), servers, true)
+                    .await;
+            assert_eq!(request["method"], method);
+            assert_eq!(
+                request["params"]["mcpServers"][0]["command"],
+                json!(command)
+            );
+        }
+    }
+
     #[tokio::test]
     async fn new_and_loaded_sessions_send_configured_mcp_servers() {
         let dir = tempfile::tempdir().unwrap();
@@ -911,6 +1178,7 @@ mod mcp_requests {
             None,
             json!({"http": true, "sse": true}),
             servers.clone(),
+            false,
         )
         .await;
         assert_eq!(new["method"], "session/new");
@@ -922,6 +1190,7 @@ mod mcp_requests {
             Some("existing-id"),
             json!({"sse": true}),
             servers,
+            false,
         )
         .await;
         assert_eq!(load["method"], "session/load");
@@ -939,7 +1208,8 @@ mod mcp_requests {
         let cwd = tempfile::tempdir().unwrap();
         let servers = mcp::read_servers(None, cwd.path()).await.unwrap();
         let (request, events) =
-            capture_session_request(cwd.path().to_path_buf(), None, json!({}), servers).await;
+            capture_session_request(cwd.path().to_path_buf(), None, json!({}), servers, false)
+                .await;
 
         assert_eq!(request["method"], "session/new");
         assert_eq!(request["params"]["mcpServers"], json!([]));
@@ -947,6 +1217,97 @@ mod mcp_requests {
             event,
             AcpEvent::SessionConfig(message) if message.contains("MCP")
         )));
+    }
+
+    #[tokio::test]
+    async fn client_transcript_follow_up_forks_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SessionManager::from_directory(dir.path().to_owned()).unwrap());
+        let history = "{\"user\":\"Original task\"}\n{\"assistant\":\"Prior result\"}\n";
+        std::fs::write(dir.path().join("parent.jsonl"), history).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (transport, mut peer) = Channel::duplex();
+            let (log_tx, log_rx) = mpsc::unbounded_channel();
+            let shared = SessionShared {
+                log_tx,
+                cancel: CancellationToken::new(),
+                replaying: Arc::default(),
+                denial_feedback: Arc::default(),
+                options: Arc::default(),
+                discovery_key: None,
+                tracking_config: Arc::default(),
+            };
+            let cwd = dir.path().to_owned();
+            let client_store = store.clone();
+            let client = tokio::spawn(acp::Client.builder().connect_with(
+                transport,
+                async move |cx| {
+                    let config = DesiredConfig {
+                        model: Some("old-model".into()),
+                        mode: Some("old-mode".into()),
+                        ..Default::default()
+                    };
+                    run_session(
+                        cx,
+                        Some("parent".into()),
+                        cwd,
+                        "Next task".into(),
+                        config,
+                        shared,
+                        Vec::new(),
+                        Some(&client_store),
+                    )
+                    .await
+                },
+            ));
+
+            let initialize = receive(&mut peer).await;
+            assert_eq!(initialize["method"], "initialize");
+            assert_eq!(initialize["params"]["protocolVersion"], 1);
+            reply(&peer, &initialize, json!({}));
+
+            let session = receive(&mut peer).await;
+            assert_eq!(session["method"], "session/new");
+            assert_eq!(session["params"]["_meta"]["history_jsonl"], history);
+            reply(&peer, &session, json!({"sessionId": "agent-id"}));
+
+            for (method, key, value) in [
+                ("session/set_model", "modelId", "old-model"),
+                ("session/set_mode", "modeId", "old-mode"),
+            ] {
+                let setter = receive(&mut peer).await;
+                assert_eq!(setter["method"], method);
+                assert_eq!(setter["params"]["sessionId"], "agent-id");
+                assert_eq!(setter["params"][key], value);
+                reply(&peer, &setter, json!({}));
+            }
+
+            let prompt = receive(&mut peer).await;
+            assert_eq!(prompt["method"], "session/prompt");
+            assert_eq!(prompt["params"]["sessionId"], "agent-id");
+            let text = prompt["params"]["prompt"][0]["text"].as_str().unwrap();
+            assert!(text.contains(history));
+            assert!(text.contains("=== CURRENT REQUEST ===\nNext task"));
+            reply(&peer, &prompt, json!({"stopReason": "end_turn"}));
+            client.await.unwrap().unwrap();
+
+            let mut stdout = Vec::new();
+            write_logs(&mut stdout, log_rx, Some(store.clone())).await;
+            let stdout = String::from_utf8(stdout).unwrap();
+            let AcpEvent::SessionStart(fork_id) = stdout.lines().next().unwrap().parse().unwrap()
+            else {
+                panic!("expected a forked display id");
+            };
+            assert!(uuid::Uuid::parse_str(&fork_id).is_ok());
+            assert_eq!(store.read_session_raw("parent").unwrap(), history);
+            assert_eq!(
+                store.read_session_raw(&fork_id).unwrap(),
+                format!("{history}{{\"user\":\"Next task\"}}\n")
+            );
+            assert!(!store.has_session("agent-id"));
+        })
+        .await
+        .expect("ACP transcript follow-up timed out");
     }
 }
 

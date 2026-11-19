@@ -8,6 +8,7 @@ pub mod file;
 pub mod issue;
 pub mod issue_board;
 pub mod issue_links;
+pub mod issue_sync;
 pub mod merge;
 pub mod project;
 pub mod pull_request;

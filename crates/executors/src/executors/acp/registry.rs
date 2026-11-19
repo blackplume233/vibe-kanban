@@ -18,15 +18,9 @@ const REGISTRY_URL: &str = "https://cdn.agentclientprotocol.com/registry/v1/late
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const CACHE_FILE_NAME: &str = "acp_registry.json";
 
-/// Registry ids of agents that already have a built-in executor
-const HIDDEN_IDS: &[&str] = &[
-    "github-copilot-cli",
-    "gemini",
-    "qwen-code",
-    "factory-droid",
-    "claude-acp",
-    "codex-acp",
-];
+/// Registry IDs that duplicate a built-in ACP executor. The Claude and Codex
+/// adapters are installable alongside their native executors under distinct keys.
+const HIDDEN_IDS: &[&str] = &["github-copilot-cli", "gemini", "qwen-code", "factory-droid"];
 
 static REGISTRY_CACHE: LazyLock<RwLock<Option<Vec<RegistryAgent>>>> =
     LazyLock::new(|| RwLock::new(None));
@@ -264,7 +258,16 @@ mod tests {
         let agents = parse_registry(FIXTURE).unwrap();
         assert_eq!(
             ids(&agents),
-            ["auggie", "claude-acp", "cline", "goose", "kilo", "qoder"]
+            [
+                "auggie",
+                "claude-acp",
+                "cline",
+                "codex-acp",
+                "github-copilot-cli",
+                "goose",
+                "kilo",
+                "qoder"
+            ]
         );
     }
 
@@ -291,15 +294,22 @@ mod tests {
         let agents = parse_registry(FIXTURE).unwrap();
         assert_eq!(
             ids(&visible_agents(&agents)),
-            ["auggie", "cline", "kilo", "qoder"]
+            [
+                "auggie",
+                "claude-acp",
+                "cline",
+                "codex-acp",
+                "kilo",
+                "qoder"
+            ]
         );
     }
 
     #[test]
     fn npx_of_includes_hidden_agents() {
         let agents = parse_registry(FIXTURE).unwrap();
-        assert!(HIDDEN_IDS.contains(&"claude-acp"));
-        assert!(npx_of(&agents, "claude-acp").is_some());
+        assert!(HIDDEN_IDS.contains(&"github-copilot-cli"));
+        assert!(npx_of(&agents, "github-copilot-cli").is_some());
         assert!(npx_of(&agents, "goose").is_none()); // no npx distribution
         assert!(npx_of(&agents, "unknown").is_none());
     }

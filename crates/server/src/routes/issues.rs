@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, put},
+    routing::{delete, get, patch, post, put},
 };
 use db::models::{
     issue::{
@@ -17,9 +17,13 @@ use db::models::{
         CreateIssueComment, CreateIssueRelationship, IssueComment, IssueRelationship,
         UpdateIssueComment,
     },
+    issue_sync::IssueSyncStoreError,
     project::{CreateLocalProject, Project},
 };
 use deployment::Deployment;
+use services::services::github_issue_sync::{
+    IssueSyncError, SyncGitHubIssueRequest, SyncGitHubIssueResponse, sync_github_issue,
+};
 use sqlx::{SqlitePool, error::ErrorKind};
 use utils::response::ApiResponse;
 use uuid::Uuid;
@@ -79,6 +83,18 @@ impl From<IssueError> for IssueApiError {
     }
 }
 
+impl From<IssueSyncError> for IssueApiError {
+    fn from(error: IssueSyncError) -> Self {
+        match error {
+            IssueSyncError::Invalid(message) => Self::Api(ApiError::BadRequest(message.into())),
+            IssueSyncError::GitHub(error) => Self::Api(ApiError::GitHost(error)),
+            IssueSyncError::Database(error)
+            | IssueSyncError::Store(IssueSyncStoreError::Database(error)) => error.into(),
+            IssueSyncError::Store(error) => Self::Api(ApiError::Conflict(error.to_string())),
+        }
+    }
+}
+
 type Reply<T> = Result<Json<ApiResponse<T>>, IssueApiError>;
 
 fn reply<T>(result: Result<T, impl Into<IssueApiError>>) -> Reply<T> {
@@ -127,6 +143,19 @@ pub(super) fn router() -> Router<DeploymentImpl> {
         .merge(tags::router())
         .merge(cycles::router())
         .merge(views::router())
+        // vibe-own M5
+        .route(
+            "/projects/{project_id}/github/issues/sync",
+            post(sync_issue),
+        )
+}
+
+async fn sync_issue(
+    State(deployment): State<DeploymentImpl>,
+    Path(project_id): Path<Uuid>,
+    Json(request): Json<SyncGitHubIssueRequest>,
+) -> Reply<SyncGitHubIssueResponse> {
+    reply(sync_github_issue(&deployment.db().pool, project_id, &request).await)
 }
 
 async fn list_projects(State(deployment): State<DeploymentImpl>) -> Reply<Vec<Project>> {

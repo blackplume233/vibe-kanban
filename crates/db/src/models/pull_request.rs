@@ -5,6 +5,7 @@ use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
 use super::merge::{Merge, MergeStatus, PrMerge, PullRequestInfo};
+use super::scratch::{DraftFollowUpData, ScratchError, ScratchPayload};
 
 #[derive(Debug, Clone, FromRow)]
 pub struct PullRequest {
@@ -211,6 +212,49 @@ impl PullRequest {
         .await
     }
 
+    pub async fn handled_review_comment_ids(
+        pool: &SqlitePool,
+        pr_id: &str,
+    ) -> Result<Vec<i64>, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT comment_id FROM github_review_follow_ups WHERE pull_request_id = ?",
+        )
+        .bind(pr_id)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Save the proposed message and its source IDs together without replacing an editor draft.
+    pub async fn draft_review_follow_up(
+        pool: &SqlitePool,
+        pr_id: &str,
+        session_id: Uuid,
+        draft: DraftFollowUpData,
+        comment_ids: &[i64],
+    ) -> Result<(), ScratchError> {
+        let payload = ScratchPayload::DraftFollowUp(draft);
+        let scratch_type = payload.scratch_type().to_string();
+        let payload = serde_json::to_string(&payload)?;
+        let mut tx = pool.begin().await?;
+        let inserted = sqlx::query("INSERT INTO scratch (id, scratch_type, payload) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")
+            .bind(session_id)
+            .bind(scratch_type)
+            .bind(payload)
+            .execute(&mut *tx)
+            .await?.rows_affected();
+        if inserted != 0 {
+            for id in comment_ids {
+                sqlx::query("INSERT INTO github_review_follow_ups (pull_request_id, comment_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
+                    .bind(pr_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn count_open_for_workspace(
         pool: &SqlitePool,
         workspace_id: Uuid,
@@ -350,5 +394,57 @@ impl PullRequest {
 
     pub fn to_merge(&self) -> Merge {
         Merge::Pr(self.to_pr_merge())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use executors::{
+        executors::BaseCodingAgent,
+        profile::{ExecutorConfig, ExecutorProfileId},
+    };
+
+    use super::*;
+    use crate::models::scratch::{Scratch, ScratchType};
+
+    #[sqlx::test]
+    async fn review_draft_records_ids_once_and_preserves_existing_draft() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        sqlx::query("INSERT INTO pull_requests (id, pr_url, pr_number, target_branch_name) VALUES ('test', 'https://github.com/example/project/pull/7', 7, 'main')")
+            .execute(&pool).await.unwrap();
+        let session_id = Uuid::new_v4();
+        let draft = |message: &str| DraftFollowUpData {
+            message: message.into(),
+            executor_config: ExecutorConfig::from(ExecutorProfileId {
+                executor: BaseCodingAgent::codex(),
+                variant: None,
+            }),
+        };
+        PullRequest::draft_review_follow_up(
+            &pool,
+            "test",
+            session_id,
+            draft("original"),
+            &[42, 42],
+        )
+        .await
+        .unwrap();
+        PullRequest::draft_review_follow_up(&pool, "test", session_id, draft("new comment"), &[43])
+            .await
+            .unwrap();
+        let scratch = Scratch::find_by_id(&pool, session_id, &ScratchType::DraftFollowUp)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(scratch.payload, ScratchPayload::DraftFollowUp(data) if data.message == "original")
+        );
+        assert_eq!(
+            PullRequest::handled_review_comment_ids(&pool, "test")
+                .await
+                .unwrap(),
+            vec![42]
+        );
     }
 }

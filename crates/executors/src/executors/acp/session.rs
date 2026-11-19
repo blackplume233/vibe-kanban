@@ -25,7 +25,10 @@ impl SessionManager {
         }
 
         let base_dir = vk_dir.join(&namespace);
+        Self::from_directory(base_dir)
+    }
 
+    pub(super) fn from_directory(base_dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(&base_dir)?;
 
         Ok(Self { base_dir })
@@ -40,14 +43,7 @@ impl SessionManager {
         self.session_file_path(session_id).exists()
     }
 
-    /// Append a raw JSON line to the session log
-    ///
-    /// We normalize ACP payloads by:
-    /// - Removing top-level `sessionId`
-    /// - Unwrapping the `update` envelope (store its object directly)
-    /// - Dropping top-level `options` (permission menu). Note: `options` is
-    ///   mutually exclusive with `update`, so when `update` is present we do not
-    ///   perform any `options` stripping.
+    /// Append an ACP log event in the client-local JSONL transcript format.
     pub fn append_raw_line(&self, session_id: &str, raw_json: &str) -> Result<()> {
         let Some(normalized) = Self::normalize_session_event(raw_json) else {
             return Ok(());
@@ -60,15 +56,8 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Attempt to normalize a raw ACP JSON event into a cleaner shape.
-    /// Rules:
-    /// - Remove top-level `sessionId` always.
-    /// - If `update` is present with an object that has `sessionUpdate`, emit
-    ///   a single-key object where key = camelCase(sessionUpdate) and value =
-    ///   the `update` object minus `sessionUpdate`.
-    /// - If `update` is absent, remove only top-level `options`.
-    ///
-    /// Returns None if the input is not a JSON object.
+    /// Keep conversational events, omitting session lifecycle and usage metadata.
+    /// Store plain text chunks as role-keyed strings and permission requests as tool updates.
     fn normalize_session_event(raw_json: &str) -> Option<String> {
         let mut event = AcpEvent::from_str(raw_json).ok()?;
 
@@ -100,7 +89,7 @@ impl SessionManager {
                 return serde_json::to_string(&serde_json::json!({"user": prompt})).ok();
             }
             AcpEvent::Message(ref content) | AcpEvent::Thought(ref content) => {
-                if let agent_client_protocol::ContentBlock::Text(text) = content {
+                if let acp::schema::v1::ContentBlock::Text(text) = content {
                     // Special simplification for pure text messages
                     let key = if let AcpEvent::Message(_) = event {
                         "assistant"
@@ -177,7 +166,11 @@ impl SessionManager {
     pub fn generate_resume_prompt(&self, session_id: &str, current_prompt: &str) -> Result<String> {
         let session_context = self.read_session_raw(session_id)?;
 
-        Ok(format!(
+        Ok(Self::resume_prompt(&session_context, current_prompt))
+    }
+
+    pub(super) fn resume_prompt(session_context: &str, current_prompt: &str) -> String {
+        format!(
             concat!(
                 "RESUME CONTEXT FOR CONTINUING TASK\n\n",
                 "=== EXECUTION HISTORY ===\n",
@@ -191,6 +184,6 @@ impl SessionManager {
                 "the previous execution left off, taking into account all the context provided above."
             ),
             session_context, current_prompt
-        ))
+        )
     }
 }

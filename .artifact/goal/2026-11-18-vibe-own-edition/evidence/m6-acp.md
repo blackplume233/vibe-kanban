@@ -36,3 +36,24 @@ Windows 上构建 `server.exe`，启动两次独立的回环 HTTP 服务，共�
 - `db::models::execution_queue::tests::restart_reclaims_only_dispatched_slots_and_draft_is_promoted_once` 验证恢复时保留等待项，以及同一草稿仅成功转换一次。
 - `executors::executors::acp::harness_v2::mcp_requests::new_and_loaded_sessions_send_configured_mcp_servers` 用双向 ACP JSON-RPC 测试 `session/new` 和 `session/load` 的实际请求，断言配置的 MCP 描述及 transport 能力筛选。此项证据对应 MCP 配置到达 ACP agent 的请求边界。
 - ACP 测试覆盖 `UsageUpdate` 上下文及美元成本映射、`PromptResponse` 用量和两者合并，同时覆盖 Claude、Codex、OpenCode 的归一化计数。
+
+## ACP Agent 发现本地 MCP 工具
+
+`new_and_loaded_sessions_discover_local_mcp_tools` 让 ACP 测试代理接收两条真实的 ACP JSON-RPC 请求。每次测试代理从请求的 `mcpServers` 取得命令及环境，启动仓库的 `vibe-kanban-mcp` 进程，通过 stdio 完成 MCP `initialize`、`notifications/initialized` 和 `tools/list`。测试使用 `--mode global`，可在独立工作树内运行。
+
+```bash
+source .artifact/goal/2026-11-18-vibe-own-edition/harness/env.sh
+export CARGO_TARGET_DIR=F:/vk-targets/m6 SQLX_OFFLINE=true
+cargo +nightly-2026-08-01 build --locked --offline -p mcp --bin vibe-kanban-mcp
+VK_TEST_MCP_BIN=F:/vk-targets/m6/debug/vibe-kanban-mcp.exe \
+  cargo +nightly-2026-08-01 test --locked --offline -p executors \
+  new_and_loaded_sessions_discover_local_mcp_tools -- --ignored --nocapture
+```
+
+使用上述 nightly 构建 MCP 可执行文件，并用同一工具链构建的测试二进制执行指定用例。退出码为 `0`，两个 MCP 子进程均在读完工具清单后正常退出。
+
+```text
+"session/new" -> MCP tools/list contains list_repos
+"session/load" -> MCP tools/list contains list_repos
+test result: ok. 1 passed; 0 failed
+```

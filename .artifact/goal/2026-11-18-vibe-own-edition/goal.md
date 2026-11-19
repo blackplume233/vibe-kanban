@@ -5,9 +5,9 @@ artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: full
 native_goal_id: null
-current_loop: loop-006
-next_sub_goal: 集成 M3 双端展示页与 M5/M6 后端，验证正式 NSH 包及本地操作界面。
-last_verified_loop: loop-006
+current_loop: loop-007
+next_sub_goal: 复验 ACP 升级，合入 GitHub 后端、正式包与本地操作界面。
+last_verified_loop: loop-007
 termination_reason: null
 handoff_summary: null
 references: references.md
