@@ -5,7 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import os from 'os';
 
-// Replaced during npm pack by scripts/release-local.sh
+// Substituted in the staged release package by scripts/release/stage-npm.mjs.
 export const BINARY_TAG = '__BINARY_TAG__'; // e.g., v0.1.46.1778000000
 
 // Binaries are GitHub Release assets of the BINARY_TAG release, stored flat:
@@ -13,8 +13,7 @@ export const BINARY_TAG = '__BINARY_TAG__'; // e.g., v0.1.46.1778000000
 //   <base>/<tag>/<platform>-<binary>.zip
 // VIBE_KANBAN_DOWNLOAD_BASE_URL points at a mirror with the same layout
 // (a corporate proxy, or a local server when testing a release).
-const DEFAULT_DOWNLOAD_BASE_URL =
-  'https://github.com/BloopAI/vibe-kanban/releases/download';
+const DEFAULT_DOWNLOAD_BASE_URL = '__RELEASE_BASE_URL__';
 export const DOWNLOAD_BASE_URL = (
   process.env.VIBE_KANBAN_DOWNLOAD_BASE_URL || DEFAULT_DOWNLOAD_BASE_URL
 ).replace(/\/+$/, '');
@@ -35,22 +34,6 @@ export interface BinaryInfo {
 
 export interface BinaryManifest {
   platforms: Record<string, Record<string, BinaryInfo>>;
-}
-
-export interface DesktopPlatformInfo {
-  file: string;
-  sha256: string;
-  type: string | null;
-}
-
-export interface DesktopManifest {
-  platforms: Record<string, DesktopPlatformInfo>;
-}
-
-export interface DesktopBundleInfo {
-  archivePath: string | null;
-  dir: string;
-  type: string | null;
 }
 
 type ProgressCallback = (downloaded: number, total: number) => void;
@@ -218,7 +201,7 @@ export async function ensureBinary(
     }
     throw new Error(
       `Local binary not found: ${localZipPath}\n` +
-        `Run ./local-build.sh first to build the binaries.`
+        `Run pnpm run build:npx first to build the binaries.`
     );
   }
 
@@ -240,79 +223,6 @@ export async function ensureBinary(
   await downloadFile(url, zipPath, binaryInfo.sha256, onProgress);
 
   return zipPath;
-}
-
-export const DESKTOP_CACHE_DIR = path.join(
-  os.homedir(),
-  '.vibe-kanban',
-  'desktop'
-);
-
-export async function ensureDesktopBundle(
-  tauriPlatform: string,
-  onProgress?: ProgressCallback
-): Promise<DesktopBundleInfo> {
-  // In local dev mode, use Tauri bundle from npx-cli/dist/tauri/<platform>/
-  if (LOCAL_DEV_MODE) {
-    const localDir = path.join(LOCAL_DIST_DIR, 'tauri', tauriPlatform);
-    if (fs.existsSync(localDir)) {
-      const files = fs.readdirSync(localDir);
-      const archive = files.find(
-        (f) => f.endsWith('.tar.gz') || f.endsWith('-setup.exe')
-      );
-      return {
-        dir: localDir,
-        archivePath: archive ? path.join(localDir, archive) : null,
-        type: null,
-      };
-    }
-    throw new Error(
-      `Local desktop bundle not found: ${localDir}\n` +
-        `Run './local-build.sh --desktop' first to build the Tauri app.`
-    );
-  }
-
-  const cacheDir = path.join(DESKTOP_CACHE_DIR, BINARY_TAG, tauriPlatform);
-
-  // Check if already installed (sentinel file from previous run)
-  const sentinelPath = path.join(cacheDir, '.installed');
-  if (fs.existsSync(sentinelPath)) {
-    return { dir: cacheDir, archivePath: null, type: null };
-  }
-
-  fs.mkdirSync(cacheDir, { recursive: true });
-
-  // Fetch the desktop manifest. Releases built without a signing
-  // certificate ship no desktop app, so there is no manifest to find.
-  let manifest: DesktopManifest;
-  try {
-    manifest = await fetchJson<DesktopManifest>(
-      assetUrl('desktop-manifest.json')
-    );
-  } catch (err) {
-    if (err instanceof HttpError && err.statusCode === 404) {
-      throw new Error(`this release (${BINARY_TAG}) has no desktop app`);
-    }
-    throw err;
-  }
-  const platformInfo = manifest.platforms?.[tauriPlatform];
-  if (!platformInfo) {
-    throw new Error(`Desktop app not available for platform: ${tauriPlatform}`);
-  }
-
-  const destPath = path.join(cacheDir, platformInfo.file);
-
-  // Skip download if file already exists (e.g. previous failed install)
-  if (!fs.existsSync(destPath)) {
-    const url = assetUrl(`desktop-${tauriPlatform}-${platformInfo.file}`);
-    await downloadFile(url, destPath, platformInfo.sha256, onProgress);
-  }
-
-  return {
-    archivePath: destPath,
-    dir: cacheDir,
-    type: platformInfo.type,
-  };
 }
 
 // The version the npm `latest` dist-tag points at.

@@ -72,42 +72,31 @@ We would prefer that ideas and changes are first raised with the core team via [
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (latest stable)
-- [Node.js](https://nodejs.org/) (>=20)
-- [pnpm](https://pnpm.io/) (>=8)
-
-Additional development tools:
-```bash
-cargo install cargo-watch
-cargo install sqlx-cli
-```
-
-Install dependencies:
-```bash
-pnpm i
-```
-
-### Running the dev server
+- [Rust](https://rustup.rs/) (`nightly-2026-08-01`, see `rust-toolchain.toml`)
+- [Node.js](https://nodejs.org/) (>=20.19) and [pnpm](https://pnpm.io/) (10.13.1)
+- LLVM (clang and `llvm-ar` for wasm32, libclang for the server build)
 
 ```bash
+pnpm run nsh:install
+pnpm run nsh:install-web
 pnpm run dev
 ```
 
-This will start the backend and web app. A blank DB will be copied from the `dev_assets_seed` folder.
+`dev` packages NSH Web and starts the standalone server with the package as its `VK_WEB_ROOT`.
+Open the local URL printed by the server. `dev:qa` enables server QA mode, and on Windows x64
+`dev:windows` packages and launches the Win32 app with the server in its own process.
 
 ### Building the web app
 
-To build just the web app:
-
 ```bash
-cd packages/local-web
-pnpm run build
+pnpm run build:web
+pnpm run build:windows  # Windows x64
+pnpm run build:npx      # Python 3.11+ required for archiving
 ```
 
-### Build from source (macOS)
-
-1. Run `./local-build.sh`
-2. Test with `cd npx-cli && node bin/cli.js`
+`build:web` produces `target/package-web/vibe-own/`. Copy the whole directory as `web/` beside the
+standalone server, or configure `VK_WEB_ROOT`. `build:npx` archives the server and Web together.
+See [RELEASING.md](RELEASING.md) for CLI pinning, native packages and release asset layout.
 
 ### Environment Variables
 
@@ -117,9 +106,9 @@ The following environment variables can be configured at build time or runtime:
 |----------|------|---------|-------------|
 | `POSTHOG_API_KEY` | Build-time | Empty | PostHog analytics API key (disables analytics if empty) |
 | `POSTHOG_API_ENDPOINT` | Build-time | Empty | PostHog analytics endpoint (disables analytics if empty) |
-| `PORT` | Runtime | Auto-assign | **Production**: Server port. **Dev**: Frontend port (backend uses PORT+1) |
-| `BACKEND_PORT` | Runtime | `0` (auto-assign) | Backend server port (dev mode only, overrides PORT+1) |
-| `FRONTEND_PORT` | Runtime | `3000` | Frontend dev server port (dev mode only, overrides PORT) |
+| `PORT` | Runtime | Auto-assign | Standalone server port when `BACKEND_PORT` is unset |
+| `BACKEND_PORT` | Runtime | `0` (auto-assign) | Standalone server port, overrides `PORT` |
+| `VK_WEB_ROOT` | Runtime | `web/` beside the executable | Directory containing the NSH `index.html` and static assets |
 | `HOST` | Runtime | `127.0.0.1` | Backend server host |
 | `MCP_HOST` | Runtime | Value of `HOST` | MCP server connection host (use `127.0.0.1` when `HOST=0.0.0.0` on Windows) |
 | `MCP_PORT` | Runtime | Value of `BACKEND_PORT` | MCP server connection port |
@@ -129,7 +118,7 @@ The following environment variables can be configured at build time or runtime:
 | `VK_SHARED_RELAY_API_BASE` | Runtime | Not set | Base URL for the relay API used by tunnel-mode connections |
 | `VK_TUNNEL` | Runtime | Not set | Enable relay tunnel mode when set (requires relay API base URL) |
 
-**Build-time variables** must be set when running `pnpm run build`. **Runtime variables** are read when the application starts.
+**Build-time variables** must be set when compiling the server. **Runtime variables** are read when the application starts.
 
 #### Self-Hosting with a Reverse Proxy or Custom Domain
 

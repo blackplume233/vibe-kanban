@@ -4,19 +4,12 @@ import fs from "fs";
 import { cac } from "cac";
 import {
   ensureBinary,
-  ensureDesktopBundle,
   BINARY_TAG,
   CACHE_DIR,
-  DESKTOP_CACHE_DIR,
   LOCAL_DEV_MODE,
   LOCAL_DIST_DIR,
   getLatestVersion,
 } from "./download";
-import {
-  getTauriPlatform,
-  installAndLaunch,
-  cleanOldDesktopVersions,
-} from "./desktop";
 
 const CLI_VERSION: string = require("../package.json").version;
 
@@ -127,7 +120,9 @@ async function extractAndRun(
   launch: (binPath: string) => void,
 ): Promise<void> {
   const binName = getBinaryName(baseName);
-  const binPath = path.join(versionCacheDir, binName);
+  const binPath = baseName === "vibe-own"
+    ? path.join(versionCacheDir, baseName, binName)
+    : path.join(versionCacheDir, binName);
   const zipPath = path.join(versionCacheDir, `${baseName}.zip`);
 
   // Clean old binary if exists
@@ -258,39 +253,20 @@ async function runReview(args: string[]): Promise<void> {
 }
 
 async function runMain(desktopMode: boolean): Promise<void> {
-  checkForUpdates();
-
-  const modeLabel = LOCAL_DEV_MODE ? " (local dev)" : "";
-  const tauriPlatform = getTauriPlatform(platformDir);
-
-  // Default: browser mode (headless server + opens browser).
-  // Use --desktop to launch the desktop app instead.
-  if (desktopMode && tauriPlatform) {
-    try {
-      console.log(
-        `Starting vibe-kanban desktop v${CLI_VERSION}${modeLabel}...`,
-      );
-      const bundleInfo = await ensureDesktopBundle(tauriPlatform, showProgress);
-      console.error(""); // newline after progress
-
-      // Clean old desktop versions after successful download
-      if (!LOCAL_DEV_MODE) {
-        cleanOldDesktopVersions(DESKTOP_CACHE_DIR, BINARY_TAG);
-      }
-
-      const exitCode = await installAndLaunch(bundleInfo, platform);
-      process.exit(exitCode);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Desktop app not available: ${msg}`);
-      console.error("Falling back to browser mode...");
-    }
+  if (desktopMode && platformDir !== "windows-x64") {
+    throw new Error("The native NSH package is available for Windows x64. Run without --desktop for the browser app.");
   }
-
-  // Browser mode (default — headless server + opens browser)
-  console.log(`Starting vibe-kanban v${CLI_VERSION}${modeLabel}...`);
-  await extractAndRun("vibe-kanban", (bin) => {
-    execSync(`"${bin}"`, { stdio: "inherit" });
+  checkForUpdates();
+  console.log(`Starting ${desktopMode ? "vibe-own desktop" : "vibe-kanban"} v${CLI_VERSION}${LOCAL_DEV_MODE ? " (local dev)" : ""}...`);
+  await extractAndRun(desktopMode ? "vibe-own" : "vibe-kanban", (bin) => {
+    const proc = spawn(bin, [], { stdio: "inherit" });
+    process.on("SIGINT", () => proc.kill("SIGINT"));
+    process.on("SIGTERM", () => proc.kill("SIGTERM"));
+    proc.on("exit", (code) => process.exit(code ?? 1));
+    proc.on("error", (error) => {
+      console.error("Could not start the app:", error.message);
+      process.exit(1);
+    });
   });
 }
 
@@ -327,7 +303,7 @@ async function main(): Promise<void> {
 
   cli
     .command("[...args]", "Launch the local vibe-kanban app")
-    .option("--desktop", "Launch the desktop app instead of browser mode")
+    .option("--desktop", "Launch the Windows x64 native app")
     .allowUnknownOptions()
     .action((_args: string[], options: RootOptions) => {
       runOrExit(runMain(Boolean(options.desktop)));

@@ -1,0 +1,43 @@
+name: Set up locked NSH tooling
+description: Install the pinned Rust, Node and NSH tooling for a package target
+inputs:
+  target:
+    description: NSH package target (web or windows)
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+    - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      with:
+        toolchain: ${{ env.RUST_TOOLCHAIN }}
+        components: clippy,rustfmt
+    - name: Install LLVM on Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang libclang-dev llvm pkg-config
+        echo CC_wasm32_unknown_unknown=clang >> "$GITHUB_ENV"
+        echo AR_wasm32_unknown_unknown=llvm-ar >> "$GITHUB_ENV"
+    - name: Configure Visual Studio LLVM
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $llvm = Join-Path (& $vswhere -latest -property installationPath) 'VC\Tools\Llvm\x64\bin'
+        "LIBCLANG_PATH=$llvm" >> $env:GITHUB_ENV
+    - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      with:
+        workspaces: .
+        cache-all-crates: true
+        shared-key: nsh-${{ inputs.target }}
+    - name: Install NSH CLI
+      shell: bash
+      run: node scripts/nsh.mjs install
+    - name: Install Web tooling
+      if: inputs.target == 'web'
+      shell: bash
+      run: node scripts/nsh.mjs install-web

@@ -10,7 +10,8 @@ Run vibe kanban instantly without installation:
 npx vibe-kanban
 ```
 
-This will launch the application locally and open it in your browser automatically.
+This launches the standalone server and opens the bundled NSH Web app in your browser.
+On Windows x64, use `npx vibe-kanban --desktop` for the native NSH app.
 
 Helpful entrypoints:
 
@@ -125,7 +126,7 @@ Vibe Kanban supports customization through its configuration system:
 ## Technical Architecture
 
 - **Backend**: Rust with Axum web framework
-- **Frontend**: React with TypeScript
+- **Frontend**: NSH Web or NSH Win32
 - **Database**: SQLite for local data storage
 - **Git Integration**: Native git operations for repository management
 - **Process Management**: Tokio-based async execution monitoring
@@ -139,7 +140,9 @@ Vibe Kanban supports customization through its configuration system:
 ## Supported Platforms
 
 - Linux x64
+- Linux ARM64
 - Windows x64
+- Windows ARM64 (browser mode)
 - macOS x64 (Intel)
 - macOS ARM64 (Apple Silicon)
 

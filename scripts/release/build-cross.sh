@@ -51,18 +51,18 @@ build_windows() (
     export DEFAULT_CC=clang-cl
     export CC_aarch64_pc_windows_msvc=/src/scripts/ring-cc-wrapper.sh
   fi
-  cargo xwin build --cross-compiler clang-cl --release --target "$target" "${BINS[@]}"
+  cargo xwin build --locked --cross-compiler clang-cl --release --target "$target" "${BINS[@]}"
 )
 
 for platform in "$@"; do
   echo "==> Building $platform"
   case "$platform" in
     linux-x64)
-      cargo zigbuild --release --target x86_64-unknown-linux-musl "${BINS[@]}"
+      cargo zigbuild --locked --release --target x86_64-unknown-linux-musl "${BINS[@]}"
       copy_out "$platform" x86_64-unknown-linux-musl ""
       ;;
     linux-arm64)
-      cargo zigbuild --release --target aarch64-unknown-linux-musl "${BINS[@]}"
+      cargo zigbuild --locked --release --target aarch64-unknown-linux-musl "${BINS[@]}"
       copy_out "$platform" aarch64-unknown-linux-musl ""
       ;;
     windows-x64)

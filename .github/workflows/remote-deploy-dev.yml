@@ -1,12 +1,6 @@
 name: Remote Deploy Dev
 
 on:
-  push:
-    branches:
-      - main 
-    paths:
-      - crates/remote/**
-      - packages/remote-web/**
   workflow_dispatch:
 
 jobs:
