@@ -15,7 +15,7 @@
 | M0 基线 | in-progress | 锁定 nightly 的公开 check、严格 Clippy 和生成一致性通过。完整 check 仍涉及私有依赖。 |
 | M1 NSH Spike | verified | 锁定 nightly 构建的 Win32 与 Chrome 通过真实服务 HTTP、日志追加与 diff。Win32 `frame` p95 为 5.77 ms。 |
 | M2 本地议题底座 | verified | SQLite、真实 HTTP API、集成的 32 项测试、类型生成和严格 Clippy 均通过。 |
-| M3 设计系统 | in-progress | 规范、主题、展示页和截图已合入。锁定 nightly 的集成复验在运行。 |
+| M3 设计系统 | verified | 锁定 nightly 通过双端展示页复验，生成检查和截图矩阵满足 E4。 |
 | M4 Linear 交互 | in-progress | 已合入动作、搜索、议题 API 与看板状态。双端操作界面开发中。 |
 | M5 GitHub 联动 | in-progress | PR 后端与 Issue 同步在独立分支验证。已创建私有测试仓库 `blackplume233/vibe-own-sandbox`。 |
 | M6 ACP 管理 | in-progress | 用量、持久队列和 MCP 已合入。SDK 升级与 Claude/Codex ACP 选择已交付，待换行修正及实机复验。 |
@@ -23,7 +23,7 @@
 
 ## Run
 
-- 当前 loop 为 `loop-006`。M1 与 M2 已通过，Win32 与 Web 产品界面按 M3–M7 继续集成。
+- 当前 loop 为 `loop-006`。M1–M3 已验收，Win32 与 Web 产品界面按 M4–M7 继续集成。
 
 ## Gate
 

@@ -1,9 +1,11 @@
 ---
-status: active
+status: complete
 updated_at: 2026-11-19
 artifact_language: zh-CN
 execution_mode: simulated-file-goal
 workflow_mode: light
+termination_reason: 锁定 nightly 下双端展示页、主题生成、截图矩阵和设计规范均已验收。
+handoff_summary: E4 已通过，M7 负责在正式包复验同一主题与字体。
 ---
 
 # Auto Goal 任务
@@ -18,4 +20,4 @@ workflow_mode: light
 
 ## 执行指导
 
-M3DesignContract 已交付。主题生成已合入，展示页组件和双端证据位于集成提交 `203a6ea60`、`ced0abaf4`。在 `F:/vk-wt/verify-m3` 重放 `harness/tools/m3-showcase.sh both`，以生成检查、实际窗口及浏览器证据验收。正式包嵌入同一主题和字体后复验实际入口。证据见 `../../evidence/m3-showcase.md`。
+M3DesignContract 已交付，展示页组件和双端证据见集成提交 `203a6ea60`、`ced0abaf4`。已在独立工作树使用锁定 nightly 复跑 `harness/tools/m3-showcase.sh both`。命令退出 `0`，两端共生成 16 张截图。见 `../../evidence/m3-showcase.md`。
