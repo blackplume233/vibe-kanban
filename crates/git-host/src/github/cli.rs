@@ -23,11 +23,12 @@ use super::{
     graphql::CheckContext,
     http::{defer_requests, rate_limited, retry_after},
 };
-use crate::{GitHostError, PrCheckSummary};
-
-use crate::types::{
-    CreatePrRequest, PrComment, PrCommentAuthor, PrReviewComment, PullRequestDetail,
-    ReviewCommentUser,
+use crate::{
+    GitHostError, PrCheckSummary,
+    types::{
+        CreatePrRequest, PrComment, PrCommentAuthor, PrReviewComment, PullRequestDetail,
+        ReviewCommentUser,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -423,27 +424,39 @@ impl GhCli {
     }
 
     pub(super) fn graphql(&self, json: &[u8]) -> Result<String, GitHostError> {
-        let mut payload = NamedTempFile::new()
+        self.api_json("POST", "graphql", Some(json))
+    }
+
+    pub(super) fn api_json(
+        &self,
+        method: &str,
+        endpoint: &str,
+        json: Option<&[u8]>,
+    ) -> Result<String, GitHostError> {
+        super::http::check_rate_limit()?;
+        let mut args = vec![
+            OsStr::new("api"),
+            OsStr::new("--hostname"),
+            OsStr::new("github.com"),
+            OsStr::new("--include"),
+            OsStr::new("--method"),
+            OsStr::new(method),
+            OsStr::new(endpoint),
+        ];
+        let mut payload = json
+            .map(|_| NamedTempFile::new())
+            .transpose()
             .map_err(|_| GitHostError::PullRequest("Could not open GitHub CLI input".into()))?;
-        payload
-            .write_all(json)
-            .map_err(|_| GitHostError::PullRequest("Could not write GitHub CLI input".into()))?;
+        if let (Some(file), Some(json)) = (&mut payload, json) {
+            file.write_all(json).map_err(|_| {
+                GitHostError::PullRequest("Could not write GitHub CLI input".into())
+            })?;
+            args.extend([OsStr::new("--input"), file.path().as_os_str()]);
+        }
         let response = self
-            .run_internal(
-                [
-                    OsStr::new("api"),
-                    OsStr::new("graphql"),
-                    OsStr::new("--hostname"),
-                    OsStr::new("github.com"),
-                    OsStr::new("--include"),
-                    OsStr::new("--input"),
-                    payload.path().as_os_str(),
-                ],
-                None,
-                true,
-            )
+            .run_internal(args, None, true)
             .map_err(sanitized_api_error)?;
-        parse_graphql_http_response(response)
+        parse_api_http_response(response)
     }
 
     pub(super) fn paged_review_comments(
@@ -493,7 +506,7 @@ impl GhCli {
     }
 }
 
-fn parse_graphql_http_response(response: String) -> Result<String, GitHostError> {
+fn parse_api_http_response(response: String) -> Result<String, GitHostError> {
     let (headers, body) = response
         .split_once("\r\n\r\n")
         .or_else(|| response.split_once("\n\n"))
@@ -528,6 +541,9 @@ fn parse_graphql_http_response(response: String) -> Result<String, GitHostError>
         )),
         403 => Err(GitHostError::InsufficientPermissions(
             "GitHub rejected the request".into(),
+        )),
+        404 => Err(GitHostError::RepoNotFoundOrNoAccess(
+            "GitHub resource unavailable".into(),
         )),
         _ => Err(GitHostError::PullRequest(format!(
             "GitHub CLI returned HTTP {status}"

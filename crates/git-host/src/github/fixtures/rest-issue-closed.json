@@ -1,0 +1,8 @@
+{
+  "id": 8123456789,
+  "number": 42,
+  "html_url": "https://github.com/acme/repo/issues/42",
+  "title": "Reproduction case",
+  "body": null,
+  "state": "closed"
+}

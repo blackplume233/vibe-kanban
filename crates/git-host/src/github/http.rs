@@ -42,6 +42,11 @@ impl GitHubApi {
         Ok(None)
     }
 
+    #[cfg(test)]
+    pub(super) fn fixture() -> Self {
+        Self(HeaderValue::from_static("fixture"))
+    }
+
     pub(super) fn request(
         &self,
         method: reqwest::Method,

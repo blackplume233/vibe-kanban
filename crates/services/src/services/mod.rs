@@ -11,6 +11,7 @@ pub mod file_ranker;
 pub mod file_search;
 pub mod filesystem;
 pub mod filesystem_watcher;
+pub mod github_issue_sync;
 pub mod notification;
 pub mod oauth_credentials;
 pub mod pr_follow_up;

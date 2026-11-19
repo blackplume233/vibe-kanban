@@ -3,6 +3,7 @@
 mod cli;
 mod graphql;
 mod http;
+mod issues;
 mod rest;
 
 use std::{path::Path, time::Duration};
@@ -13,6 +14,7 @@ pub use cli::GhCli;
 use cli::{GhCliError, GitHubRepoInfo};
 pub use graphql::{GitHubPrSnapshot, PR_BATCH_SIZE};
 use http::GitHubApi;
+pub use issues::{GitHubIssue, GitHubIssueClient, GitHubIssuePatch, GitHubRepository, IssueState};
 use tokio::task;
 use tracing::info;
 
