@@ -49,6 +49,8 @@ pub enum GitHostError {
     CliNotInstalled { provider: ProviderKind },
     #[error("Not a git repository: {0}")]
     NotAGitRepository(String),
+    #[error("GitHub rate limit reached; retry in {retry_after:?}")]
+    RateLimited { retry_after: std::time::Duration },
     #[error("Unsupported git hosting provider")]
     UnsupportedProvider,
     #[error("CLI returned unexpected output: {0}")]
@@ -64,6 +66,7 @@ impl GitHostError {
                 | GitHostError::RepoNotFoundOrNoAccess(_)
                 | GitHostError::CliNotInstalled { .. }
                 | GitHostError::NotAGitRepository(_)
+                | GitHostError::RateLimited { .. }
                 | GitHostError::UnsupportedProvider
         )
     }
@@ -139,6 +142,21 @@ impl UnifiedPrComment {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct FailedPrCheck {
+    pub name: String,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PrCheckSummary {
+    pub total: u32,
+    pub passed: u32,
+    pub failed: u32,
+    pub pending: u32,
+    pub failures: Vec<FailedPrCheck>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PullRequestDetail {
     pub number: i64,
@@ -149,6 +167,9 @@ pub struct PullRequestDetail {
     pub title: String,
     pub base_branch: String,
     pub head_branch: String,
+    /// `None` when the host or operation did not provide CI status.
+    #[serde(default)]
+    pub checks: Option<PrCheckSummary>,
 }
 
 impl From<PullRequestDetail> for PullRequestInfo {

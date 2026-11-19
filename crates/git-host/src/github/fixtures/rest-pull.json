@@ -1,0 +1,14 @@
+{
+  "number": 12,
+  "html_url": "https://github.com/example/project/pull/12",
+  "state": "closed",
+  "merged_at": "2026-11-19T08:45:00Z",
+  "merge_commit_sha": "merge-sha",
+  "title": "Cache changes",
+  "base": {
+    "ref": "main"
+  },
+  "head": {
+    "ref": "feature/cache"
+  }
+}

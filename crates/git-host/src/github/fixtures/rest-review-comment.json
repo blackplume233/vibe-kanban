@@ -1,0 +1,14 @@
+{
+  "id": 1024,
+  "user": {
+    "login": "maintainer"
+  },
+  "body": "Cover the no-cache path.",
+  "created_at": "2026-11-19T08:30:00Z",
+  "html_url": "https://github.com/example/project/pull/12#discussion_r1024",
+  "author_association": "MEMBER",
+  "path": "src/lib.rs",
+  "line": 12,
+  "side": "RIGHT",
+  "diff_hunk": "@@ -10,0 +12,1 @@"
+}
