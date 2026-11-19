@@ -5,23 +5,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-        map.retain(|_, monitor| !monitor.is_finished());
-        // The process status is published before its exit monitor finishes
-        // persisting the final Git state and releasing the scheduler slot.
-        let monitors = std::mem::take(&mut *self.exit_monitor_handles.write().await);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        for (id, mut monitor) in monitors {
-            match tokio::time::timeout_at(deadline, &mut monitor).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::warn!(%id, %error, "Execution monitor failed"),
-                Err(_) => {
-                    tracing::warn!(%id, "Execution monitor exceeded the shutdown deadline");
-                    monitor.abort();
-                    let _ = monitor.await;
-                }
-            }
-        }
-
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -258,6 +241,7 @@ impl LocalContainerService {
 
     async fn add_exit_monitor_handle(&self, id: Uuid, handle: JoinHandle<()>) {
         let mut map = self.exit_monitor_handles.write().await;
+        map.retain(|_, monitor| !monitor.is_finished());
         map.insert(id, handle);
     }
 
@@ -1731,6 +1715,22 @@ impl ContainerService for LocalContainerService {
                 );
             } else {
                 tracing::info!("Successfully killed process: id={}", process.id);
+            }
+        }
+
+        // The process status is published before its exit monitor finishes
+        // persisting the final Git state and releasing the scheduler slot.
+        let monitors = std::mem::take(&mut *self.exit_monitor_handles.write().await);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        for (id, mut monitor) in monitors {
+            match tokio::time::timeout_at(deadline, &mut monitor).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::warn!(%id, %error, "Execution monitor failed"),
+                Err(_) => {
+                    tracing::warn!(%id, "Execution monitor exceeded the shutdown deadline");
+                    monitor.abort();
+                    let _ = monitor.await;
+                }
             }
         }
 
